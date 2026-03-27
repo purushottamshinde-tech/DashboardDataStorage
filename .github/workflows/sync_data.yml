@@ -120,7 +120,7 @@ jobs:
               subprocess.run(['git', 'config', '--global', 'user.name', 'Sync-Bot'])
               subprocess.run(['git', 'remote', 'set-url', 'origin', repo_url])
               subprocess.run(['git', 'add', OUTPUT_FILE])
-              subprocess.run(['git', 'commit', '-m', f'Auto-sync: {datetime.now()}'])
+              subprocess.run(['git', 'push', '-f', 'origin', 'HEAD:main'])
               subprocess.run(['git', 'push', 'origin', 'main'])
               print("🚀 Pushed to GitHub!")
           EOF
