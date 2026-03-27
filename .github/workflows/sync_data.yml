@@ -54,67 +54,78 @@ jobs:
           oms_csv = fetch_csv(session, OMS_CARD_ID)
           dn_csv = fetch_csv(session, DN_DUMP_CARD_ID)
 
-          # 1. PROCESS DN DUMP 
-          # We now use 'customer' from your SQL as the link to 'SSE ID'
-          dn_lookup = {}
+          # 1. ORGANIZE DN DUMP BY CUSTOMER (SSE ID)
+          dn_items = {}
           for row in csv.DictReader(StringIO(dn_csv)):
-              sid = row.get('customer', '').strip() 
+              sid = row.get('customer', '').strip()
               if not sid: continue
-              
-              if sid not in dn_lookup:
-                  dn_lookup[sid] = {}
-              
-              # Pivoting items into the main row
-              cat = row.get('item_category', 'Other').replace(" ", "_")
-              dn_lookup[sid][f'DN_{cat}_Qty'] = row.get('qty')
-              dn_lookup[sid][f'DN_{cat}_Rate'] = row.get('rate')
-              dn_lookup[sid][f'DN_{cat}_Total'] = row.get('amount')
-              dn_lookup[sid]['DN_Last_Posting_Date'] = row.get('posting_date')
-              dn_lookup[sid]['DN_Latest_Status'] = row.get('Delivery Note Status')
+              if sid not in dn_items:
+                  dn_items[sid] = []
+              dn_items[sid].append(row)
 
-          # 2. MERGE INTO OMS
+          # 2. PERFORM FLAT JOIN
           merged = []
-          oms_rows = list(csv.DictReader(StringIO(oms_csv)))
+          # These are the columns from OMS that must come first
+          oms_base_headers = [
+              'SSE ID', 'Installation Completion Date', 'Cell Name', 'City', 'State', 
+              'Project Size (kW)', 'Offer Type', 'Phase Connection', 'System Price (Rs.)', 
+              'Total Price (Rs.)', 'Cost Escalation', 'Other Charges', 'Discount', 
+              'EMI Processing Fees', 'Additional Cable Length Cost', 
+              'Additional Inverter Position Cost', 'Metering (Config Driven)', 
+              'Final Revenue', 'Final Revenue Excl. GST'
+          ]
           
-          for oms_row in oms_rows:
+          # These are the columns from DN Dump that follow
+          dn_headers = [
+              'parent', 'item_category', 'item_subcategory', 'item_code', 
+              'item_name', 'qty', 'rate', 'amount', 'Delivery Note Status', 'posting_date'
+          ]
+
+          for oms_row in csv.DictReader(StringIO(oms_csv)):
               sse_id = oms_row.get('SSE ID', '').strip()
-              dn_data = dn_lookup.get(sse_id, {})
-              
-              # Combine OMS row with matched DN data from 'customer' column
-              combined = {**oms_row, **dn_data}
+              items = dn_items.get(sse_id, [])
 
-              # 3. APPLY MARCH 2026 RATE CORRECTIONS
-              mod_name = combined.get('Module_Item_Name', '')
-              qty_raw = combined.get('Module_Qty', 0)
-              
-              try:
-                  qty = float(qty_raw) if qty_raw else 0
-              except ValueError:
-                  qty = 0
+              if not items:
+                  # Create a blank entry for projects with no DN data yet
+                  blank_dn = {h: '' for h in dn_headers}
+                  merged.append({**oms_row, **blank_dn})
+              else:
+                  for item in items:
+                      # Combine OMS data with this specific Item data
+                      combined = {**oms_row}
+                      for h in dn_headers:
+                          combined[h] = item.get(h, '')
 
-              if "545 Wp Mono Bifacial Non DCR-PREMIER" in mod_name:
-                  combined['Module_Rate'] = RATE_545_NON_DCR
-                  combined['Module_Total_Amount'] = qty * RATE_545_NON_DCR
-              elif "540 Wp Mono Bifacial DCR-PREMIER" in mod_name:
-                  combined['Module_Rate'] = RATE_540_DCR
-                  combined['Module_Total_Amount'] = qty * RATE_540_DCR
+                      # 3. APPLY MARCH 2026 RATE CORRECTION
+                      # Logic: If item_name matches the specific modules, override rate/amount
+                      try:
+                          iqty = float(combined.get('qty', 0) or 0)
+                      except:
+                          iqty = 0
 
-              merged.append(combined)
+                      if "545 Wp Mono Bifacial Non DCR-PREMIER" in str(combined.get('item_name')):
+                          combined['rate'] = RATE_545_NON_DCR
+                          combined['amount'] = iqty * RATE_545_NON_DCR
+                      elif "540 Wp Mono Bifacial DCR-PREMIER" in str(combined.get('item_name')):
+                          combined['rate'] = RATE_540_DCR
+                          combined['amount'] = iqty * RATE_540_DCR
 
-          # 4. SAVE FINAL CSV
+                      merged.append(combined)
+
+          # 4. SAVE FINAL CSV WITH SPECIFIC COLUMN ORDER
           if merged:
-              # Dynamically build fieldnames to include all new DN columns
-              all_keys = []
-              for d in merged:
-                  for k in d.keys():
-                      if k not in all_keys:
-                          all_keys.append(k)
-                          
+              # Final Header sequence: OMS Base -> DN Item Details -> Rest of OMS
+              existing_keys = list(merged[0].keys())
+              final_column_order = oms_base_headers + dn_headers
+              for k in existing_keys:
+                  if k not in final_column_order:
+                      final_column_order.append(k)
+
               with open("mastersheet.csv", "w", newline="", encoding='utf-8') as f:
-                  writer = csv.DictWriter(f, fieldnames=all_keys)
+                  writer = csv.DictWriter(f, fieldnames=final_column_order, extrasaction='ignore')
                   writer.writeheader()
                   writer.writerows(merged)
-              print(f"🚀 Success! Created mastersheet.csv with {len(merged)} rows.")
+              print(f"🚀 Success! Created mastersheet.csv with {len(merged)} rows (Flat Join).")
           EOF
 
       - name: Commit and Push
