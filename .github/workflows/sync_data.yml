@@ -37,7 +37,6 @@ jobs:
           OMS_CARD_ID = 2154
           DN_DUMP_CARD_ID = 2106
           
-          # March 2026 Corrected Rates
           RATE_545_NON_DCR = 8134.52
           RATE_540_DCR = 12065.00
 
@@ -50,48 +49,40 @@ jobs:
               return res.text
 
           session = get_session()
-          print("📥 Downloading Data...")
           oms_csv = fetch_csv(session, OMS_CARD_ID)
           dn_csv = fetch_csv(session, DN_DUMP_CARD_ID)
 
-          # 1. ORGANIZE DN DUMP BY CUSTOMER (Link to SSE ID)
+          # 1. ORGANIZE DN DUMP (Link 'customer' to 'SSE ID')
           dn_items = {}
           for row in csv.DictReader(StringIO(dn_csv)):
-              # We use 'customer' from your SQL to link to 'SSE ID'
               sid = row.get('customer', '').strip()
-              if not sid: continue
-              if sid not in dn_items:
-                  dn_items[sid] = []
-              dn_items[sid].append(row)
+              if sid:
+                  if sid not in dn_items: dn_items[sid] = []
+                  dn_items[sid].append(row)
 
-          # 2. DEFINE THE OUTPUT FORMAT & COLUMN ORDER
-          # Order: sseid, date, cluster, category, subcat, item code, item name, qty, rate, amount, revenue
+          # 2. DEFINE THE STRICT COLUMN ORDER (To save space/rid of excess)
           final_headers = [
               'SSE ID', 'Installation Completion Date', 'Cell Name', 'item_category', 
               'item_subcategory', 'item_code', 'item_name', 'qty', 'rate', 'amount', 
-              'Final Revenue', 'Final Revenue Excl. GST', 'parent', 'City', 'State', 
-              'Project Size (kW)', 'Offer Type', 'Phase Connection', 'Delivery Note Status'
+              'Final Revenue', 'Final Revenue Excl. GST', 'parent', 'City', 'State'
           ]
 
-          # 3. PERFORM FLAT JOIN
+          # 3. FLAT JOIN LOGIC
           merged = []
           for oms_row in csv.DictReader(StringIO(oms_csv)):
               sse_id = oms_row.get('SSE ID', '').strip()
               items = dn_items.get(sse_id, [])
 
               if not items:
-                  # If no DN found, keep 1 row with blank DN info but full revenue
-                  row_data = {**oms_row}
-                  # Ensure these keys exist even if empty
-                  for h in ['item_category', 'item_subcategory', 'item_code', 'item_name', 'qty', 'rate', 'amount', 'parent']:
-                      row_data[h] = ''
+                  # Keep OMS info, leave Item info blank
+                  row_data = {h: oms_row.get(h, '') for h in final_headers}
                   merged.append(row_data)
               else:
                   for item in items:
-                      # Duplicate OMS/Revenue data for every single item in DN Dump
-                      row_data = {**oms_row}
+                      # Create a row for every item, duplicating OMS/Revenue
+                      row_data = {h: oms_row.get(h, '') for h in final_headers}
                       
-                      # Mapping DN Dump columns to the keys used in the CSV
+                      # Fill in the DN-specific data
                       row_data['parent'] = item.get('parent', '')
                       row_data['item_category'] = item.get('item_category', '')
                       row_data['item_subcategory'] = item.get('item_subcategory', '')
@@ -100,18 +91,17 @@ jobs:
                       row_data['qty'] = item.get('qty', '')
                       row_data['rate'] = item.get('rate', '')
                       row_data['amount'] = item.get('amount', '')
-                      row_data['Delivery Note Status'] = item.get('Delivery Note Status', '')
 
-                      # 4. APPLY MARCH 2026 RATE CORRECTION
+                      # 4. MARCH 2026 RATE CORRECTION
                       try:
-                          iqty = float(row_data.get('qty', 0) or 0)
+                          iqty = float(row_data['qty']) if row_data['qty'] else 0
                       except:
                           iqty = 0
 
-                      if "545 Wp Mono Bifacial Non DCR-PREMIER" in str(row_data.get('item_name')):
+                      if "545 Wp Mono Bifacial Non DCR-PREMIER" in str(row_data['item_name']):
                           row_data['rate'] = RATE_545_NON_DCR
                           row_data['amount'] = iqty * RATE_545_NON_DCR
-                      elif "540 Wp Mono Bifacial DCR-PREMIER" in str(row_data.get('item_name')):
+                      elif "540 Wp Mono Bifacial DCR-PREMIER" in str(row_data['item_name']):
                           row_data['rate'] = RATE_540_DCR
                           row_data['amount'] = iqty * RATE_540_DCR
 
@@ -123,7 +113,7 @@ jobs:
                   writer = csv.DictWriter(f, fieldnames=final_headers, extrasaction='ignore')
                   writer.writeheader()
                   writer.writerows(merged)
-              print(f"✅ Success! Created flat itemized mastersheet.csv with {len(merged)} rows.")
+              print(f"✅ Success! Created optimized mastersheet.csv")
           EOF
 
       - name: Commit and Push
