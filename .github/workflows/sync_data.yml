@@ -9,7 +9,7 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # This is the most important line
+      contents: write
         
     steps:
       - name: Checkout repo
@@ -23,55 +23,93 @@ jobs:
       - name: Install dependencies
         run: pip install requests
             
-      - name: Run Fetch and Merge Script
+      - name: Run Fetch, Merge and Correct Script
         run: |
           python3 << 'EOF'
           import requests
           import csv
+          import os
           from io import StringIO
+          from datetime import datetime
 
+          # --- CONFIGURATION ---
           METABASE_URL = "https://metabase-lighthouse.solarsquare.in"
           USERNAME = "devika.g@solarsquare.in"
           PASSWORD = "Devika@2025"
           OMS_CARD_ID = 2154
           DN_DUMP_CARD_ID = 2106
+          OUTPUT_FILE = "mastersheet.csv"
+
+          # Corrected Rates for March 2026 Analysis
+          RATE_545_NON_DCR = 8134.52
+          RATE_540_DCR = 12065.00
 
           def get_metabase_session():
-              response = requests.post(f"{METABASE_URL}/api/session", json={"username": USERNAME, "password": PASSWORD})
-              return response.json()['id']
+              try:
+                  res = requests.post(f"{METABASE_URL}/api/session", json={"username": USERNAME, "password": PASSWORD}, timeout=15)
+                  return res.json()['id']
+              except Exception as e:
+                  print(f"❌ Session Error: {e}")
+                  return None
 
           def fetch_csv(session_id, card_id):
-              response = requests.post(f"{METABASE_URL}/api/card/{card_id}/query/csv", headers={"X-Metabase-Session": session_id})
-              return response.text
+              try:
+                  res = requests.post(f"{METABASE_URL}/api/card/{card_id}/query/csv", headers={"X-Metabase-Session": session_id}, timeout=60)
+                  return res.text
+              except Exception as e:
+                  print(f"❌ Fetch Error Card {card_id}: {e}")
+                  return ""
 
           session = get_metabase_session()
+          if not session: exit(1)
+
+          print("📥 Downloading OMS and DN data...")
           oms_csv = fetch_csv(session, OMS_CARD_ID)
           dn_csv = fetch_csv(session, DN_DUMP_CARD_ID)
 
-          # Simple Merge Logic
-          oms_data = list(csv.DictReader(StringIO(oms_csv)))
-          dn_data = {list(row.values())[0]: row for row in csv.DictReader(StringIO(dn_csv))}
+          # 1. Map DN Data using 'SSE ID' as the unique key
+          dn_map = {}
+          for row in csv.DictReader(StringIO(dn_csv)):
+              sid = row.get('SSE ID', '').strip()
+              if sid:
+                  dn_map[sid] = row
 
+          # 2. Process OMS and Merge
           merged = []
-          for oms_row in oms_data:
-              cid = list(oms_row.values())[0]
-              if cid in dn_data:
-                  merged.append({**oms_row, **dn_data[cid]})
-              else:
-                  merged.append(oms_row)
+          for oms_row in csv.DictReader(StringIO(oms_csv)):
+              sid = oms_row.get('SSE ID', '').strip()
+              
+              # Pull DN data if it exists for this ID
+              dn_data = dn_map.get(sid, {})
+              combined_row = {**oms_row, **dn_data}
 
+              # 3. APPLY MODULE RATE LOGIC
+              # Check Module Name and recalculate Rate/Amount
+              mod_item = combined_row.get('Module_Item_Name', '')
+              qty = float(combined_row.get('Module_Qty', 0) or 0)
+
+              if "545 Wp Mono Bifacial Non DCR-PREMIER" in mod_item:
+                  combined_row['Module_Rate'] = RATE_545_NON_DCR
+                  combined_row['Module_Total_Amount'] = qty * RATE_545_NON_DCR
+              elif "540 Wp Mono Bifacial DCR-PREMIER" in mod_item:
+                  combined_row['Module_Rate'] = RATE_540_DCR
+                  combined_row['Module_Total_Amount'] = qty * RATE_540_DCR
+
+              merged.append(combined_row)
+
+          # 4. Save Final CSV
           if merged:
-              with open("mastersheet.csv", "w", newline="") as f:
+              with open(OUTPUT_FILE, "w", newline="", encoding='utf-8') as f:
                   writer = csv.DictWriter(f, fieldnames=merged[0].keys())
                   writer.writeheader()
                   writer.writerows(merged)
-              print(f"✅ Created file with {len(merged)} rows")
+              print(f"🚀 Success! Created {OUTPUT_FILE} with {len(merged)} rows.")
           EOF
 
-      - name: Commit and Push changes
+      - name: Commit and Push to GitHub
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add mastersheet.csv
-          git commit -m "Auto-update data: $(date)" || echo "No changes to commit"
+          git commit -m "Auto-sync: $(date +'%Y-%m-%d %H:%M')" || echo "No changes to commit"
           git push origin main
