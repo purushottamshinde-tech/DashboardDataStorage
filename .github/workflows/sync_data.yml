@@ -1,4 +1,4 @@
-name: 🤖 Triple-File Sync (Master Data Fix)
+name: 🤖 Triple-File Sync (Final Data Fix)
 
 on:
   schedule:
@@ -29,6 +29,7 @@ jobs:
           import requests
           import csv
           import gzip
+          import re
           from io import StringIO
 
           # --- CONFIG ---
@@ -38,9 +39,6 @@ jobs:
           OMS_CARD_ID = 2154
           DN_DUMP_CARD_ID = 2106
           
-          RATE_545_NON_DCR = 8134.52
-          RATE_540_DCR = 12065.00
-
           def get_session():
               res = requests.post(f"{METABASE_URL}/api/session", json={"username": USERNAME, "password": PASSWORD})
               return res.json()['id']
@@ -50,50 +48,50 @@ jobs:
               return res.text
 
           session = get_session()
-          print("📥 Fetching raw data...")
           raw_oms = fetch_csv(session, OMS_CARD_ID)
           raw_dn = fetch_csv(session, DN_DUMP_CARD_ID)
 
-          # Save backups
+          # Save Compressed Backups
           with gzip.open('oms_dump.csv.gz', 'wt') as f: f.write(raw_oms)
           with gzip.open('dn_dump.csv.gz', 'wt') as f: f.write(raw_dn)
 
           oms_rows = list(csv.DictReader(StringIO(raw_oms)))
           dn_rows = list(csv.DictReader(StringIO(raw_dn)))
 
-          # 1. ORGANIZE DN DUMP BY CUSTOMER (The Join Key)
+          # 1. ORGANIZE DN DUMP BY CUSTOMER
           dn_lookup = {}
           for row in dn_rows:
-              # Logic: 'customer' is your DN Join Key
-              sid = str(row.get('customer', '')).strip().upper()
-              if sid:
-                  if sid not in dn_lookup: dn_lookup[sid] = []
-                  dn_lookup[sid].append(row)
+              # Use .strip() and .upper() to prevent invisible mismatches
+              cust_id = str(row.get('customer', '')).strip().upper()
+              if cust_id:
+                  if cust_id not in dn_lookup: dn_lookup[cust_id] = []
+                  dn_lookup[cust_id].append(row)
 
-          # 2. DEFINE OUTPUT HEADERS
+          # 2. DEFINE OUTPUT HEADERS (Mapped to your requirements)
           final_headers = [
               'SSE ID', 'Date', 'Cluster', 'Final Revenue', 
               'item_code', 'item_name', 'item_category', 'item_subcategory', 
               'qty', 'rate', 'amount'
           ]
 
-          # 3. PERFORM THE JOIN (OMS sse_id <-> DN customer)
           merged = []
           for oms_row in oms_rows:
-              # Logic: 'SSE ID' is your OMS Join Key (from Metabase header)
-              sid = str(oms_row.get('SSE ID', '')).strip().upper()
-              items = dn_lookup.get(sid, [])
+              # Get the ID from OMS card
+              sse_id = str(oms_row.get('SSE ID', '')).strip().upper()
+              
+              # Try to find match in DN lookup
+              items = dn_lookup.get(sse_id, [])
 
-              # Prepare the base data from OMS
+              # Prepare Base Data (OMS)
               base_data = {
-                  'SSE ID': sid,
+                  'SSE ID': sse_id,
                   'Date': oms_row.get('Installation Completion Date'),
                   'Cluster': oms_row.get('Cell Name'),
                   'Final Revenue': oms_row.get('Final Revenue')
               }
 
               if not items:
-                  # If no delivery items, create one row with empty DN columns
+                  # IMPORTANT: Even if no items, we ADD the OMS row so you get data!
                   row_data = {**base_data}
                   for h in final_headers[4:]: row_data[h] = ''
                   merged.append(row_data)
@@ -107,17 +105,6 @@ jobs:
                       row_data['qty'] = item.get('qty', '')
                       row_data['rate'] = item.get('rate', '')
                       row_data['amount'] = item.get('amount', '')
-
-                      # March 2026 Rate Correction
-                      try:
-                          iqty = float(row_data['qty'] or 0)
-                          if "545 Wp Mono Bifacial Non DCR-PREMIER" in str(row_data['item_name']):
-                              row_data['rate'] = RATE_545_NON_DCR
-                              row_data['amount'] = iqty * RATE_545_NON_DCR
-                          elif "540 Wp Mono Bifacial DCR-PREMIER" in str(row_data['item_name']):
-                              row_data['rate'] = RATE_540_DCR
-                              row_data['amount'] = iqty * RATE_540_DCR
-                      except: pass
                       merged.append(row_data)
 
           # 4. SAVE MASTERSHEET
@@ -126,7 +113,7 @@ jobs:
               writer.writeheader()
               writer.writerows(merged)
           
-          print(f"🚀 Success! Created mastersheet.csv with {len(merged)} rows.")
+          print(f"✅ Success! Created mastersheet.csv with {len(merged)} rows.")
           EOF
 
       - name: Commit and Push
@@ -134,5 +121,5 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add mastersheet.csv oms_dump.csv.gz dn_dump.csv.gz
-          git commit -m "Auto-update: Joined Mastersheet $(date)" || echo "No changes"
+          git commit -m "Auto-update: $(date)" || echo "No changes"
           git push origin main
