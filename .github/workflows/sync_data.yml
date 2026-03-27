@@ -57,44 +57,50 @@ jobs:
           # 1. ORGANIZE DN DUMP BY CUSTOMER (Link to SSE ID)
           dn_items = {}
           for row in csv.DictReader(StringIO(dn_csv)):
+              # We use 'customer' from your SQL to link to 'SSE ID'
               sid = row.get('customer', '').strip()
               if not sid: continue
               if sid not in dn_items:
                   dn_items[sid] = []
               dn_items[sid].append(row)
 
-          # 2. DEFINE COLUMN ORDER
-          oms_base_headers = [
-              'SSE ID', 'Installation Completion Date', 'Cell Name', 'City', 'State', 
-              'Project Size (kW)', 'Offer Type', 'Phase Connection', 'System Price (Rs.)', 
-              'Total Price (Rs.)', 'Cost Escalation', 'Other Charges', 'Discount', 
-              'EMI Processing Fees', 'Additional Cable Length Cost', 
-              'Additional Inverter Position Cost', 'Metering (Config Driven)', 
-              'Final Revenue', 'Final Revenue Excl. GST'
-          ]
-          
-          dn_headers = [
-              'parent', 'item_category', 'item_subcategory', 'item_code', 
-              'item_name', 'qty', 'rate', 'amount', 'Delivery Note Status', 'posting_date'
+          # 2. DEFINE THE OUTPUT FORMAT & COLUMN ORDER
+          # Order: sseid, date, cluster, category, subcat, item code, item name, qty, rate, amount, revenue
+          final_headers = [
+              'SSE ID', 'Installation Completion Date', 'Cell Name', 'item_category', 
+              'item_subcategory', 'item_code', 'item_name', 'qty', 'rate', 'amount', 
+              'Final Revenue', 'Final Revenue Excl. GST', 'parent', 'City', 'State', 
+              'Project Size (kW)', 'Offer Type', 'Phase Connection', 'Delivery Note Status'
           ]
 
-          # 3. PERFORM FLAT JOIN (Duplicate OMS row for every DN Item)
+          # 3. PERFORM FLAT JOIN
           merged = []
           for oms_row in csv.DictReader(StringIO(oms_csv)):
               sse_id = oms_row.get('SSE ID', '').strip()
               items = dn_items.get(sse_id, [])
 
               if not items:
-                  # If no DN found, create one row with empty DN columns
+                  # If no DN found, keep 1 row with blank DN info but full revenue
                   row_data = {**oms_row}
-                  for h in dn_headers: row_data[h] = ''
+                  # Ensure these keys exist even if empty
+                  for h in ['item_category', 'item_subcategory', 'item_code', 'item_name', 'qty', 'rate', 'amount', 'parent']:
+                      row_data[h] = ''
                   merged.append(row_data)
               else:
                   for item in items:
+                      # Duplicate OMS/Revenue data for every single item in DN Dump
                       row_data = {**oms_row}
-                      # Insert DN data into specific keys
-                      for h in dn_headers:
-                          row_data[h] = item.get(h, '')
+                      
+                      # Mapping DN Dump columns to the keys used in the CSV
+                      row_data['parent'] = item.get('parent', '')
+                      row_data['item_category'] = item.get('item_category', '')
+                      row_data['item_subcategory'] = item.get('item_subcategory', '')
+                      row_data['item_code'] = item.get('item_code', '')
+                      row_data['item_name'] = item.get('item_name', '')
+                      row_data['qty'] = item.get('qty', '')
+                      row_data['rate'] = item.get('rate', '')
+                      row_data['amount'] = item.get('amount', '')
+                      row_data['Delivery Note Status'] = item.get('Delivery Note Status', '')
 
                       # 4. APPLY MARCH 2026 RATE CORRECTION
                       try:
@@ -111,20 +117,13 @@ jobs:
 
                       merged.append(row_data)
 
-          # 5. CONSTRUCT FINAL HEADER & SAVE
+          # 5. SAVE
           if merged:
-              # Start with Base OMS -> Then DN Columns -> Then everything else
-              existing_keys = list(merged[0].keys())
-              final_order = oms_base_headers + dn_headers
-              for k in existing_keys:
-                  if k not in final_order:
-                      final_order.append(k)
-
               with open("mastersheet.csv", "w", newline="", encoding='utf-8') as f:
-                  writer = csv.DictWriter(f, fieldnames=final_order, extrasaction='ignore')
+                  writer = csv.DictWriter(f, fieldnames=final_headers, extrasaction='ignore')
                   writer.writeheader()
                   writer.writerows(merged)
-              print(f"✅ Success! Created itemized mastersheet.csv with {len(merged)} rows.")
+              print(f"✅ Success! Created flat itemized mastersheet.csv with {len(merged)} rows.")
           EOF
 
       - name: Commit and Push
@@ -132,5 +131,5 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add mastersheet.csv
-          git commit -m "Auto-update: $(date +'%Y-%m-%d %H:%M')" || echo "No changes to commit"
+          git commit -m "Auto-update: $(date +'%Y-%m-%d %H:%M')" || echo "No changes"
           git push origin main
