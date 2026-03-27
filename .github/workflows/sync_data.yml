@@ -1,4 +1,4 @@
-name: 🤖 Triple-File Sync (OMS, DN, & Mastersheet)
+name: 🤖 Triple-File Sync (Master Data Fix)
 
 on:
   schedule:
@@ -23,7 +23,7 @@ jobs:
       - name: Install dependencies
         run: pip install requests
             
-      - name: Fetch, Merge, and Save 3 Files
+      - name: Fetch, Merge, and Save
         run: |
           python3 << 'EOF'
           import requests
@@ -50,71 +50,83 @@ jobs:
               return res.text
 
           session = get_session()
-          print("📥 Fetching raw data from Metabase...")
-          raw_oms_text = fetch_csv(session, OMS_CARD_ID)
-          raw_dn_text = fetch_csv(session, DN_DUMP_CARD_ID)
+          print("📥 Fetching raw data...")
+          raw_oms = fetch_csv(session, OMS_CARD_ID)
+          raw_dn = fetch_csv(session, DN_DUMP_CARD_ID)
 
-          # --- FILE 1 & 2: SAVE RAW DUMPS (Compressed to stay under 100MB) ---
-          with gzip.open('oms_dump.csv.gz', 'wt', encoding='utf-8') as f:
-              f.write(raw_oms_text)
-          with gzip.open('dn_dump.csv.gz', 'wt', encoding='utf-8') as f:
-              f.write(raw_dn_text)
+          # Save backups
+          with gzip.open('oms_dump.csv.gz', 'wt') as f: f.write(raw_oms)
+          with gzip.open('dn_dump.csv.gz', 'wt') as f: f.write(raw_dn)
 
-          # --- FILE 3: CREATE THE 12-COLUMN MASTERSHEET ---
-          oms_data = list(csv.DictReader(StringIO(raw_oms_text)))
-          dn_data = list(csv.DictReader(StringIO(raw_dn_text)))
+          oms_rows = list(csv.DictReader(StringIO(raw_oms)))
+          dn_rows = list(csv.DictReader(StringIO(raw_dn)))
 
+          # 1. ORGANIZE DN DUMP BY CUSTOMER (The Join Key)
           dn_lookup = {}
-          for row in dn_data:
+          for row in dn_rows:
+              # Logic: 'customer' is your DN Join Key
               sid = str(row.get('customer', '')).strip().upper()
               if sid:
                   if sid not in dn_lookup: dn_lookup[sid] = []
                   dn_lookup[sid].append(row)
 
+          # 2. DEFINE OUTPUT HEADERS
           final_headers = [
-              'SSE ID', 'Installation Completion Date', 'Cell Name', 
-              'Final Revenue', 'Final Revenue Excl. GST',
+              'SSE ID', 'Date', 'Cluster', 'Final Revenue', 
               'item_code', 'item_name', 'item_category', 'item_subcategory', 
               'qty', 'rate', 'amount'
           ]
 
+          # 3. PERFORM THE JOIN (OMS sse_id <-> DN customer)
           merged = []
-          for oms_row in oms_data:
-              sse_id = str(oms_row.get('SSE ID', '')).strip().upper()
-              items = dn_lookup.get(sse_id, [])
+          for oms_row in oms_rows:
+              # Logic: 'SSE ID' is your OMS Join Key (from Metabase header)
+              sid = str(oms_row.get('SSE ID', '')).strip().upper()
+              items = dn_lookup.get(sid, [])
+
+              # Prepare the base data from OMS
+              base_data = {
+                  'SSE ID': sid,
+                  'Date': oms_row.get('Installation Completion Date'),
+                  'Cluster': oms_row.get('Cell Name'),
+                  'Final Revenue': oms_row.get('Final Revenue')
+              }
 
               if not items:
-                  new_row = {h: oms_row.get(h, '') for h in final_headers}
-                  merged.append(new_row)
+                  # If no delivery items, create one row with empty DN columns
+                  row_data = {**base_data}
+                  for h in final_headers[4:]: row_data[h] = ''
+                  merged.append(row_data)
               else:
                   for item in items:
-                      new_row = {h: oms_row.get(h, '') for h in final_headers}
-                      new_row['item_code'] = item.get('item_code', '')
-                      new_row['item_name'] = item.get('item_name', '')
-                      new_row['item_category'] = item.get('item_category', '')
-                      new_row['item_subcategory'] = item.get('item_subcategory', '')
-                      new_row['qty'] = item.get('qty', '')
-                      new_row['rate'] = item.get('rate', '')
-                      new_row['amount'] = item.get('amount', '')
+                      row_data = {**base_data}
+                      row_data['item_code'] = item.get('item_code', '')
+                      row_data['item_name'] = item.get('item_name', '')
+                      row_data['item_category'] = item.get('item_category', '')
+                      row_data['item_subcategory'] = item.get('item_subcategory', '')
+                      row_data['qty'] = item.get('qty', '')
+                      row_data['rate'] = item.get('rate', '')
+                      row_data['amount'] = item.get('amount', '')
 
-                      # Rate Correction
+                      # March 2026 Rate Correction
                       try:
-                          iqty = float(new_row['qty'] or 0)
-                          if "545 Wp Mono Bifacial Non DCR-PREMIER" in str(new_row['item_name']):
-                              new_row['rate'] = RATE_545_NON_DCR
-                              new_row['amount'] = iqty * RATE_545_NON_DCR
-                          elif "540 Wp Mono Bifacial DCR-PREMIER" in str(new_row['item_name']):
-                              new_row['rate'] = RATE_540_DCR
-                              new_row['amount'] = iqty * RATE_540_DCR
+                          iqty = float(row_data['qty'] or 0)
+                          if "545 Wp Mono Bifacial Non DCR-PREMIER" in str(row_data['item_name']):
+                              row_data['rate'] = RATE_545_NON_DCR
+                              row_data['amount'] = iqty * RATE_545_NON_DCR
+                          elif "540 Wp Mono Bifacial DCR-PREMIER" in str(row_data['item_name']):
+                              row_data['rate'] = RATE_540_DCR
+                              row_data['amount'] = iqty * RATE_540_DCR
                       except: pass
-                      merged.append(new_row)
+                      merged.append(row_data)
 
+          # 4. SAVE MASTERSHEET
           with open("mastersheet.csv", "w", newline="", encoding='utf-8') as f:
               writer = csv.DictWriter(f, fieldnames=final_headers, extrasaction='ignore')
               writer.writeheader()
               writer.writerows(merged)
           
-          print(f"🚀 Successfully created 3 files: oms_dump.csv.gz, dn_dump.csv.gz, and mastersheet.csv")
+          print(f"🚀 Success! Created mastersheet.csv with {len(merged)} rows.")
           EOF
 
       - name: Commit and Push
@@ -122,5 +134,5 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add mastersheet.csv oms_dump.csv.gz dn_dump.csv.gz
-          git commit -m "Auto-update: Triple File Sync $(date)" || echo "No changes"
+          git commit -m "Auto-update: Joined Mastersheet $(date)" || echo "No changes"
           git push origin main
