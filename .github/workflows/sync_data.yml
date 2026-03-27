@@ -1,4 +1,4 @@
-name: 🤖 Metabase to GitHub Sync (Final Optimized CSV)
+name: 🤖 Metabase to GitHub Sync (Data Fix)
 
 on:
   schedule:
@@ -37,7 +37,6 @@ jobs:
           OMS_CARD_ID = 2154
           DN_DUMP_CARD_ID = 2106
           
-          # March 2026 Rates
           RATE_545_NON_DCR = 8134.52
           RATE_540_DCR = 12065.00
 
@@ -50,49 +49,44 @@ jobs:
               return res.text
 
           session = get_session()
-          oms_csv = fetch_csv(session, OMS_CARD_ID)
-          dn_csv = fetch_csv(session, DN_DUMP_CARD_ID)
+          print("📥 Downloading OMS and DN Data...")
+          oms_data = list(csv.DictReader(StringIO(fetch_csv(session, OMS_CARD_ID))))
+          dn_data = list(csv.DictReader(StringIO(fetch_csv(session, DN_DUMP_CARD_ID))))
 
-          # 1. Map DN Items (Link 'customer' to 'SSE ID')
-          dn_items = {}
-          for row in csv.DictReader(StringIO(dn_csv)):
-              sid = row.get('customer', '').strip()
+          # 1. Map DN Items (Clean the 'customer' key to match 'SSE ID')
+          dn_lookup = {}
+          for row in dn_data:
+              # We clean the ID to ensure "SSE001" matches "SSE001 "
+              sid = str(row.get('customer', '')).strip().upper()
               if sid:
-                  if sid not in dn_items: dn_items[sid] = []
-                  dn_items[sid].append(row)
+                  if sid not in dn_lookup: dn_lookup[sid] = []
+                  dn_lookup[sid].append(row)
 
-          # 2. THE 12 COLUMNS YOU REQUESTED (This keeps the file size SMALL)
+          # 2. THE 12 COLUMNS FROM YOUR SCREENSHOT
           final_headers = [
-              'SSE ID', 
-              'Installation Completion Date', 
-              'Cell Name', 
-              'Final Revenue', 
-              'Final Revenue Excl. GST',
-              'item_code', 
-              'item_name', 
-              'item_category', 
-              'item_subcategory', 
-              'qty', 
-              'rate', 
-              'amount'
+              'SSE ID', 'Installation Completion Date', 'Cell Name', 
+              'Final Revenue', 'Final Revenue Excl. GST',
+              'item_code', 'item_name', 'item_category', 'item_subcategory', 
+              'qty', 'rate', 'amount'
           ]
 
-          # 3. FLAT JOIN
+          # 3. PERFORM THE JOIN
           merged = []
-          for oms_row in csv.DictReader(StringIO(oms_csv)):
-              sse_id = oms_row.get('SSE ID', '').strip()
-              items = dn_items.get(sse_id, [])
+          for oms_row in oms_data:
+              # Clean the OMS ID to match the DN ID
+              sse_id = str(oms_row.get('SSE ID', '')).strip().upper()
+              items = dn_lookup.get(sse_id, [])
 
               if not items:
-                  # If no DN, one row with OMS data only
+                  # If no match found, we still create 1 row so the OMS data is visible
                   new_row = {h: oms_row.get(h, '') for h in final_headers}
                   merged.append(new_row)
               else:
                   for item in items:
-                      # Create a row for every item
+                      # Create a row for EVERY item in the delivery note
                       new_row = {h: oms_row.get(h, '') for h in final_headers}
                       
-                      # Fill DN Details
+                      # Map DN details into the specific columns
                       new_row['item_code'] = item.get('item_code', '')
                       new_row['item_name'] = item.get('item_name', '')
                       new_row['item_category'] = item.get('item_category', '')
@@ -120,6 +114,7 @@ jobs:
               writer = csv.DictWriter(f, fieldnames=final_headers, extrasaction='ignore')
               writer.writeheader()
               writer.writerows(merged)
+          print(f"🚀 Success! Processed {len(merged)} rows into mastersheet.csv")
           EOF
 
       - name: Commit and Push
