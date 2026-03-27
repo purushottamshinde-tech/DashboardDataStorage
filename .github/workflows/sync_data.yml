@@ -1,4 +1,4 @@
-name: 🤖 Metabase to GitHub Sync - Optimized
+name: 🤖 Metabase to GitHub Sync (Optimized CSV)
 
 on:
   schedule:
@@ -21,205 +21,101 @@ jobs:
           python-version: '3.10'
             
       - name: Install dependencies
-        run: pip install requests pandas
-
-      - name: Optimized Fetch, Merge & Save
+        run: pip install requests
+            
+      - name: Run Fetch, Merge and Filter CSV
         run: |
           python3 << 'EOF'
           import requests
           import csv
-          import json
           from io import StringIO
-          
-          # ═══════════════════════════════════════════════════════════════
-          # CONFIG
-          # ═══════════════════════════════════════════════════════════════
+
+          # --- CONFIG ---
           METABASE_URL = "https://metabase-lighthouse.solarsquare.in"
           USERNAME = "devika.g@solarsquare.in"
           PASSWORD = "Devika@2025"
           OMS_CARD_ID = 2154
           DN_DUMP_CARD_ID = 2106
           
+          # March 2026 Rates
           RATE_545_NON_DCR = 8134.52
           RATE_540_DCR = 12065.00
-          
-          # ═══════════════════════════════════════════════════════════════
-          # STEP 1: FETCH DATA
-          # ═══════════════════════════════════════════════════════════════
-          
-          print("🔐 Authenticating Metabase...")
-          res = requests.post(
-              f"{METABASE_URL}/api/session",
-              json={"username": USERNAME, "password": PASSWORD},
-              timeout=10
-          )
-          session = res.json()['id']
-          print("✅ Authenticated")
-          
-          print("📥 Fetching OMS data...")
-          oms_res = requests.post(
-              f"{METABASE_URL}/api/card/{OMS_CARD_ID}/query/csv",
-              headers={"X-Metabase-Session": session},
-              timeout=30
-          )
-          oms_csv = oms_res.text
-          print(f"✅ OMS fetched")
-          
-          print("📥 Fetching DN Dump data...")
-          dn_res = requests.post(
-              f"{METABASE_URL}/api/card/{DN_DUMP_CARD_ID}/query/csv",
-              headers={"X-Metabase-Session": session},
-              timeout=30
-          )
-          dn_csv = dn_res.text
-          print(f"✅ DN Dump fetched")
-          
-          # ═══════════════════════════════════════════════════════════════
-          # STEP 2: ORGANIZE DATA (Minimal columns to save space)
-          # ═══════════════════════════════════════════════════════════════
-          
-          print("🔄 Processing OMS data...")
-          oms_data = {}
-          oms_reader = csv.DictReader(StringIO(oms_csv))
-          
-          # IMPORTANT: Adjust these column names based on your actual OMS columns
-          oms_columns_to_keep = [
-              'SSE ID', 'Installation Completion Date', 'Cell Name',
-              'Final Revenue', 'Final Revenue Excl. GST'
-          ]
-          
-          for row in oms_reader:
-              sse_id = row.get('SSE ID', '').strip()
-              if sse_id:
-                  # Store only essential OMS columns (saves space!)
-                  oms_data[sse_id] = {col: row.get(col, '') for col in oms_columns_to_keep}
-          
-          print(f"✅ OMS: {len(oms_data)} unique records")
-          
-          # ═══════════════════════════════════════════════════════════════
-          # STEP 3: ORGANIZE DN DUMP (Item level data)
-          # ═══════════════════════════════════════════════════════════════
-          
-          print("🔄 Processing DN Dump data...")
+
+          def get_session():
+              res = requests.post(f"{METABASE_URL}/api/session", json={"username": USERNAME, "password": PASSWORD})
+              return res.json()['id']
+
+          def fetch_csv(sid, cid):
+              res = requests.post(f"{METABASE_URL}/api/card/{cid}/query/csv", headers={"X-Metabase-Session": sid})
+              return res.text
+
+          session = get_session()
+          print("📥 Downloading Data...")
+          oms_csv = fetch_csv(session, OMS_CARD_ID)
+          dn_csv = fetch_csv(session, DN_DUMP_CARD_ID)
+
+          # 1. ORGANIZE DN DUMP (Linking 'customer' to 'SSE ID')
           dn_items = {}
-          dn_reader = csv.DictReader(StringIO(dn_csv))
-          
-          # IMPORTANT: Adjust these column names based on your actual DN columns
-          dn_columns_to_keep = [
-              'customer', 'parent', 'item_category', 'item_subcategory',
-              'item_code', 'item_name', 'qty', 'rate', 'amount'
-          ]
-          
-          for row in dn_reader:
-              sse_id = row.get('customer', '').strip()
-              if sse_id:
-                  if sse_id not in dn_items:
-                      dn_items[sse_id] = []
-                  # Store only essential DN columns (saves space!)
-                  dn_items[sse_id].append({col: row.get(col, '') for col in dn_columns_to_keep})
-          
-          print(f"✅ DN Dump: {len(dn_items)} unique customers with items")
-          
-          # ═══════════════════════════════════════════════════════════════
-          # STEP 4: MERGE WITH OPTIMIZED COLUMN ORDER
-          # ═══════════════════════════════════════════════════════════════
-          
-          print("🔗 Merging OMS + DN Dump...")
-          
-          # Final optimized column order (only essential columns!)
+          for row in csv.DictReader(StringIO(dn_csv)):
+              sid = row.get('customer', '').strip()
+              if not sid: continue
+              if sid not in dn_items: dn_items[sid] = []
+              dn_items[sid].append(row)
+
+          # 2. DEFINE YOUR 12 SPECIFIC COLUMNS
+          # This list acts as a 'filter' to keep the file size small
           final_headers = [
-              'SSE ID', 'Installation Completion Date', 'Cell Name',
-              'item_category', 'item_subcategory', 'item_code', 'item_name',
-              'qty', 'rate', 'amount',
-              'Final Revenue', 'Final Revenue Excl. GST'
+              'SSE ID', 'Installation Completion Date', 'Cell Name', 
+              'Final Revenue', 'Final Revenue Excl. GST',
+              'item_code', 'item_name', 'item_category', 'item_subcategory', 
+              'qty', 'rate', 'amount'
           ]
-          
+
+          # 3. PERFORM FLAT JOIN
           merged_rows = []
-          
-          for sse_id, oms_row in oms_data.items():
+          for oms_row in csv.DictReader(StringIO(oms_csv)):
+              sse_id = oms_row.get('SSE ID', '').strip()
               items = dn_items.get(sse_id, [])
-              
+
               if not items:
-                  # No items for this SSE ID - create one row with OMS data only
-                  row = {
-                      'SSE ID': sse_id,
-                      'Installation Completion Date': oms_row.get('Installation Completion Date', ''),
-                      'Cell Name': oms_row.get('Cell Name', ''),
-                      'item_category': '',
-                      'item_subcategory': '',
-                      'item_code': '',
-                      'item_name': '',
-                      'qty': '',
-                      'rate': '',
-                      'amount': '',
-                      'Final Revenue': oms_row.get('Final Revenue', ''),
-                      'Final Revenue Excl. GST': oms_row.get('Final Revenue Excl. GST', '')
-                  }
-                  merged_rows.append(row)
+                  # Keep OMS info, blank DN info
+                  new_row = {h: oms_row.get(h, '') for h in final_headers}
+                  merged_rows.append(new_row)
               else:
-                  # Create one row PER ITEM, but reuse OMS data (no duplication!)
                   for item in items:
-                      row = {
-                          'SSE ID': sse_id,
-                          'Installation Completion Date': oms_row.get('Installation Completion Date', ''),
-                          'Cell Name': oms_row.get('Cell Name', ''),
-                          'item_category': item.get('item_category', ''),
-                          'item_subcategory': item.get('item_subcategory', ''),
-                          'item_code': item.get('item_code', ''),
-                          'item_name': item.get('item_name', ''),
-                          'qty': item.get('qty', ''),
-                          'rate': item.get('rate', ''),
-                          'amount': item.get('amount', ''),
-                          'Final Revenue': oms_row.get('Final Revenue', ''),
-                          'Final Revenue Excl. GST': oms_row.get('Final Revenue Excl. GST', '')
-                      }
+                      # One row for every item delivered
+                      new_row = {h: oms_row.get(h, '') for h in final_headers}
                       
-                      # ═══════════════════════════════════════════════════════════════
-                      # STEP 5: APPLY RATE CORRECTIONS (Optional)
-                      # ═══════════════════════════════════════════════════════════════
-                      
+                      # Map DN columns specifically
+                      new_row['item_code'] = item.get('item_code', '')
+                      new_row['item_name'] = item.get('item_name', '')
+                      new_row['item_category'] = item.get('item_category', '')
+                      new_row['item_subcategory'] = item.get('item_subcategory', '')
+                      new_row['qty'] = item.get('qty', '')
+                      new_row['rate'] = item.get('rate', '')
+                      new_row['amount'] = item.get('amount', '')
+
+                      # 4. RATE CORRECTION Logic
                       try:
-                          iqty = float(row['qty']) if row['qty'] else 0
+                          iqty = float(new_row['qty']) if new_row['qty'] else 0
+                          if "545 Wp Mono Bifacial Non DCR-PREMIER" in str(new_row['item_name']):
+                              new_row['rate'] = RATE_545_NON_DCR
+                              new_row['amount'] = iqty * RATE_545_NON_DCR
+                          elif "540 Wp Mono Bifacial DCR-PREMIER" in str(new_row['item_name']):
+                              new_row['rate'] = RATE_540_DCR
+                              new_row['amount'] = iqty * RATE_540_DCR
                       except:
-                          iqty = 0
-                      
-                      item_name = str(row['item_name'])
-                      
-                      if "545 Wp Mono Bifacial Non DCR-PREMIER" in item_name:
-                          row['rate'] = RATE_545_NON_DCR
-                          row['amount'] = iqty * RATE_545_NON_DCR
-                      elif "540 Wp Mono Bifacial DCR-PREMIER" in item_name:
-                          row['rate'] = RATE_540_DCR
-                          row['amount'] = iqty * RATE_540_DCR
-                      
-                      merged_rows.append(row)
-          
-          print(f"✅ Merged: {len(merged_rows)} total rows")
-          
-          # ═══════════════════════════════════════════════════════════════
-          # STEP 6: SAVE OPTIMIZED CSV
-          # ═══════════════════════════════════════════════════════════════
-          
-          print("💾 Saving mastersheet.csv...")
-          with open("mastersheet.csv", "w", newline="", encoding='utf-8') as f:
-              writer = csv.DictWriter(f, fieldnames=final_headers)
-              writer.writeheader()
-              writer.writerows(merged_rows)
-          
-          # Get file size
-          import os
-          file_size = os.path.getsize("mastersheet.csv") / (1024 * 1024)  # MB
-          print(f"✅ Saved! File size: {file_size:.2f} MB")
-          
-          if file_size > 100:
-              print(f"⚠️  WARNING: File size ({file_size:.2f}MB) exceeds 100MB GitHub limit!")
-              print("Consider filtering data (e.g., last 6 months only)")
-          else:
-              print(f"✅ File size is within GitHub limit (100MB)")
-          
-          print("\n" + "="*60)
-          print("✅ SYNC COMPLETE!")
-          print("="*60)
+                          pass
+
+                      merged_rows.append(new_row)
+
+          # 5. SAVE TO mastersheet.csv
+          if merged_rows:
+              with open("mastersheet.csv", "w", newline="", encoding='utf-8') as f:
+                  writer = csv.DictWriter(f, fieldnames=final_headers, extrasaction='ignore')
+                  writer.writeheader()
+                  writer.writerows(merged_rows)
+              print(f"✅ Success! Created mastersheet.csv with {len(merged_rows)} rows.")
           EOF
 
       - name: Commit and Push
@@ -227,5 +123,5 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add mastersheet.csv
-          git commit -m "🤖 Auto-sync: $(date +'%Y-%m-%d %H:%M') - Optimized" || echo "No changes"
+          git commit -m "Auto-update CSV: $(date)" || echo "No changes"
           git push origin main
