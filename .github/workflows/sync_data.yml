@@ -31,10 +31,10 @@ jobs:
           from io import StringIO
 
           METABASE_URL = "https://metabase-lighthouse.solarsquare.in"
-          USERNAME = "sanket.mhatre@solarsquare.in"
-          PASSWORD = "fUNp01NKbJtA4r"
-          OMS_CARD_ID = 1593
-          DN_DUMP_CARD_ID = 1589
+          USERNAME = "devika.g@solarsquare.in"
+          PASSWORD = "Devika@2025"
+          OMS_CARD_ID = 2154
+          DN_DUMP_CARD_ID = 2106
 
           def get_metabase_session():
               response = requests.post(f"{METABASE_URL}/api/session", json={"username": USERNAME, "password": PASSWORD})
