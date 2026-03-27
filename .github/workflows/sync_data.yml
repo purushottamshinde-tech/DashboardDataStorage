@@ -1,32 +1,126 @@
-name: Metabase Sync Automation
+name: 🤖 Metabase to GitHub Sync
 
 on:
   schedule:
-    - cron: '*/30 * * * *' # Runs every 30 minutes
-  workflow_dispatch:      # Allows you to run it manually for testing
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
 
 jobs:
-  build:
+  sync:
     runs-on: ubuntu-latest
+    # This gives the Action permission to write to your repo
+    permissions:
+      contents: write
+        
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-
+      - name: Checkout repo
+        uses: actions/checkout@v4
+            
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.9'
-
+          python-version: '3.10'
+            
       - name: Install dependencies
-        run: pip install requests pandas
-
+        run: pip install requests
+            
       - name: Run sync script
-        run: python sync_complete.py
-
-      - name: Commit and push changes
+        env:
+          # We pass the secret here so Python can read it properly
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git config --global user.name "GitHub Action"
-          git config --global user.email "action@github.com"
-          git add mastersheet.csv
-          git commit -m "Auto-update: Sync Metabase data" || exit 0
-          git push
+          python3 << 'EOF'
+          import requests
+          import csv
+          import subprocess
+          import os
+          from datetime import datetime
+          from io import StringIO
+
+          METABASE_URL = "https://metabase-lighthouse.solarsquare.in"
+          USERNAME = "sanket.mhatre@solarsquare.in"
+          PASSWORD = "fUNp01NKbJtA4r"
+          OMS_CARD_ID = 1593
+          DN_DUMP_CARD_ID = 1589
+          OUTPUT_FILE = "mastersheet.csv"
+
+          def get_metabase_session():
+              try:
+                  response = requests.post(f"{METABASE_URL}/api/session", json={"username": USERNAME, "password": PASSWORD}, timeout=10)
+                  response.raise_for_status()
+                  return response.json()['id']
+              except Exception as e:
+                  print(f"❌ Login failed: {e}")
+                  return None
+
+          def fetch_csv_from_metabase(session_id, card_id):
+              try:
+                  response = requests.post(f"{METABASE_URL}/api/card/{card_id}/query/csv", headers={"X-Metabase-Session": session_id}, timeout=30)
+                  response.raise_for_status()
+                  return response.text
+              except Exception as e:
+                  print(f"❌ Fetch failed: {e}")
+                  return None
+
+          def csv_to_list(csv_text):
+              reader = csv.DictReader(StringIO(csv_text))
+              return list(reader)
+
+          def merge_data(oms_data, dn_data):
+              dn_map = {}
+              for row in dn_data:
+                  cid = list(row.values())[0] if row else None
+                  if cid:
+                      key = str(cid).strip()
+                      if key not in dn_map:
+                          dn_map[key] = []
+                      dn_map[key].append(row)
+              
+              merged = []
+              for oms_row in oms_data:
+                  cid = list(oms_row.values())[0] if oms_row else None
+                  if cid:
+                      key = str(cid).strip()
+                      dn_rows = dn_map.get(key, [])
+                      if dn_rows:
+                          for dn_row in dn_rows:
+                              merged.append({**oms_row, **dn_row})
+                      else:
+                          merged.append(oms_row)
+              return merged
+
+          def list_to_csv(data):
+              if not data: return ""
+              fieldnames = list(data[0].keys())
+              output = StringIO()
+              writer = csv.DictWriter(output, fieldnames=fieldnames)
+              writer.writeheader()
+              writer.writerows(data)
+              return output.getvalue()
+
+          print("🔐 Authenticating...")
+          session = get_metabase_session()
+          if not session: exit(1)
+
+          print("📥 Fetching Data...")
+          oms_csv = fetch_csv_from_metabase(session, OMS_CARD_ID)
+          dn_csv = fetch_csv_from_metabase(session, DN_DUMP_CARD_ID)
+          
+          if oms_csv and dn_csv:
+              merged = merge_data(csv_to_list(oms_csv), csv_to_list(dn_csv))
+              with open(OUTPUT_FILE, "w") as f:
+                  f.write(list_to_csv(merged))
+              print(f"✅ Saved {len(merged)} rows")
+
+              # GIT PUSH SECTION
+              token = os.getenv("GH_TOKEN")
+              repo_url = f"https://x-access-token:{token}@github.com/{os.getenv('GITHUB_REPOSITORY')}.git"
+              
+              subprocess.run(['git', 'config', '--global', 'user.email', 'bot@github.com'])
+              subprocess.run(['git', 'config', '--global', 'user.name', 'Sync-Bot'])
+              subprocess.run(['git', 'remote', 'set-url', 'origin', repo_url])
+              subprocess.run(['git', 'add', OUTPUT_FILE])
+              subprocess.run(['git', 'commit', '-m', f'Auto-sync: {datetime.now()}'])
+              subprocess.run(['git', 'push', 'origin', 'main'])
+              print("🚀 Pushed to GitHub!")
+          EOF
