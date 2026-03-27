@@ -1,4 +1,4 @@
-name: 🤖 Metabase to GitHub Sync
+name: 🤖 Metabase to GitHub Sync (JSON Optimized)
 
 on:
   schedule:
@@ -23,11 +23,12 @@ jobs:
       - name: Install dependencies
         run: pip install requests
             
-      - name: Run Fetch, Merge and Correct Script
+      - name: Run Fetch and Create JSON
         run: |
           python3 << 'EOF'
           import requests
           import csv
+          import json
           from io import StringIO
 
           # --- CONFIG ---
@@ -37,6 +38,7 @@ jobs:
           OMS_CARD_ID = 2154
           DN_DUMP_CARD_ID = 2106
           
+          # March 2026 Rates
           RATE_545_NON_DCR = 8134.52
           RATE_540_DCR = 12065.00
 
@@ -52,74 +54,52 @@ jobs:
           oms_csv = fetch_csv(session, OMS_CARD_ID)
           dn_csv = fetch_csv(session, DN_DUMP_CARD_ID)
 
-          # 1. ORGANIZE DN DUMP (Link 'customer' to 'SSE ID')
-          dn_items = {}
+          # 1. Map DN Items (Using 'customer' as the SSE ID key)
+          dn_lookup = {}
           for row in csv.DictReader(StringIO(dn_csv)):
               sid = row.get('customer', '').strip()
-              if sid:
-                  if sid not in dn_items: dn_items[sid] = []
-                  dn_items[sid].append(row)
+              if not sid: continue
+              
+              # Apply Rate Correction
+              qty = float(row.get('qty', 0) or 0)
+              if "545 Wp Mono Bifacial Non DCR-PREMIER" in str(row.get('item_name')):
+                  row['rate'] = RATE_545_NON_DCR
+                  row['amount'] = qty * RATE_545_NON_DCR
+              elif "540 Wp Mono Bifacial DCR-PREMIER" in str(row.get('item_name')):
+                  row['rate'] = RATE_540_DCR
+                  row['amount'] = qty * RATE_540_DCR
 
-          # 2. DEFINE THE STRICT COLUMN ORDER (To save space/rid of excess)
-          final_headers = [
-              'SSE ID', 'Installation Completion Date', 'Cell Name', 'item_category', 
-              'item_subcategory', 'item_code', 'item_name', 'qty', 'rate', 'amount', 
-              'Final Revenue', 'Final Revenue Excl. GST', 'parent', 'City', 'State'
-          ]
+              if sid not in dn_lookup: dn_lookup[sid] = []
+              dn_lookup[sid].append(row)
 
-          # 3. FLAT JOIN LOGIC
-          merged = []
+          # 2. Build Nested JSON
+          final_output = []
           for oms_row in csv.DictReader(StringIO(oms_csv)):
-              sse_id = oms_row.get('SSE ID', '').strip()
-              items = dn_items.get(sse_id, [])
+              sid = oms_row.get('SSE ID', '').strip()
+              
+              project_entry = {
+                  "sse_id": sid,
+                  "date": oms_row.get("Installation Completion Date"),
+                  "cluster": oms_row.get("Cell Name"),
+                  "revenue": oms_row.get("Final Revenue"),
+                  "revenue_excl_gst": oms_row.get("Final Revenue Excl. GST"),
+                  "city": oms_row.get("City"),
+                  "state": oms_row.get("State"),
+                  "delivery_items": dn_lookup.get(sid, []) # This is the nested list
+              }
+              final_output.append(project_entry)
 
-              if not items:
-                  # Keep OMS info, leave Item info blank
-                  row_data = {h: oms_row.get(h, '') for h in final_headers}
-                  merged.append(row_data)
-              else:
-                  for item in items:
-                      # Create a row for every item, duplicating OMS/Revenue
-                      row_data = {h: oms_row.get(h, '') for h in final_headers}
-                      
-                      # Fill in the DN-specific data
-                      row_data['parent'] = item.get('parent', '')
-                      row_data['item_category'] = item.get('item_category', '')
-                      row_data['item_subcategory'] = item.get('item_subcategory', '')
-                      row_data['item_code'] = item.get('item_code', '')
-                      row_data['item_name'] = item.get('item_name', '')
-                      row_data['qty'] = item.get('qty', '')
-                      row_data['rate'] = item.get('rate', '')
-                      row_data['amount'] = item.get('amount', '')
-
-                      # 4. MARCH 2026 RATE CORRECTION
-                      try:
-                          iqty = float(row_data['qty']) if row_data['qty'] else 0
-                      except:
-                          iqty = 0
-
-                      if "545 Wp Mono Bifacial Non DCR-PREMIER" in str(row_data['item_name']):
-                          row_data['rate'] = RATE_545_NON_DCR
-                          row_data['amount'] = iqty * RATE_545_NON_DCR
-                      elif "540 Wp Mono Bifacial DCR-PREMIER" in str(row_data['item_name']):
-                          row_data['rate'] = RATE_540_DCR
-                          row_data['amount'] = iqty * RATE_540_DCR
-
-                      merged.append(row_data)
-
-          # 5. SAVE
-          if merged:
-              with open("mastersheet.csv", "w", newline="", encoding='utf-8') as f:
-                  writer = csv.DictWriter(f, fieldnames=final_headers, extrasaction='ignore')
-                  writer.writeheader()
-                  writer.writerows(merged)
-              print(f"✅ Success! Created optimized mastersheet.csv")
+          # 3. Write to File
+          with open("data.json", "w", encoding='utf-8') as f:
+              json.dump(final_output, f, indent=2)
+          
+          print(f"✅ Success! Created data.json with {len(final_output)} projects.")
           EOF
 
       - name: Commit and Push
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add mastersheet.csv
-          git commit -m "Auto-update: $(date +'%Y-%m-%d %H:%M')" || echo "No changes"
+          git add data.json
+          git commit -m "Auto-update JSON: $(date)" || echo "No changes"
           git push origin main
