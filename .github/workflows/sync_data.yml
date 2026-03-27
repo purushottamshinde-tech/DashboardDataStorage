@@ -54,7 +54,7 @@ jobs:
           oms_csv = fetch_csv(session, OMS_CARD_ID)
           dn_csv = fetch_csv(session, DN_DUMP_CARD_ID)
 
-          # 1. ORGANIZE DN DUMP BY CUSTOMER (SSE ID)
+          # 1. ORGANIZE DN DUMP BY CUSTOMER (Link to SSE ID)
           dn_items = {}
           for row in csv.DictReader(StringIO(dn_csv)):
               sid = row.get('customer', '').strip()
@@ -63,9 +63,7 @@ jobs:
                   dn_items[sid] = []
               dn_items[sid].append(row)
 
-          # 2. PERFORM FLAT JOIN
-          merged = []
-          # These are the columns from OMS that must come first
+          # 2. DEFINE COLUMN ORDER
           oms_base_headers = [
               'SSE ID', 'Installation Completion Date', 'Cell Name', 'City', 'State', 
               'Project Size (kW)', 'Offer Type', 'Phase Connection', 'System Price (Rs.)', 
@@ -75,57 +73,58 @@ jobs:
               'Final Revenue', 'Final Revenue Excl. GST'
           ]
           
-          # These are the columns from DN Dump that follow
           dn_headers = [
               'parent', 'item_category', 'item_subcategory', 'item_code', 
               'item_name', 'qty', 'rate', 'amount', 'Delivery Note Status', 'posting_date'
           ]
 
+          # 3. PERFORM FLAT JOIN (Duplicate OMS row for every DN Item)
+          merged = []
           for oms_row in csv.DictReader(StringIO(oms_csv)):
               sse_id = oms_row.get('SSE ID', '').strip()
               items = dn_items.get(sse_id, [])
 
               if not items:
-                  # Create a blank entry for projects with no DN data yet
-                  blank_dn = {h: '' for h in dn_headers}
-                  merged.append({**oms_row, **blank_dn})
+                  # If no DN found, create one row with empty DN columns
+                  row_data = {**oms_row}
+                  for h in dn_headers: row_data[h] = ''
+                  merged.append(row_data)
               else:
                   for item in items:
-                      # Combine OMS data with this specific Item data
-                      combined = {**oms_row}
+                      row_data = {**oms_row}
+                      # Insert DN data into specific keys
                       for h in dn_headers:
-                          combined[h] = item.get(h, '')
+                          row_data[h] = item.get(h, '')
 
-                      # 3. APPLY MARCH 2026 RATE CORRECTION
-                      # Logic: If item_name matches the specific modules, override rate/amount
+                      # 4. APPLY MARCH 2026 RATE CORRECTION
                       try:
-                          iqty = float(combined.get('qty', 0) or 0)
+                          iqty = float(row_data.get('qty', 0) or 0)
                       except:
                           iqty = 0
 
-                      if "545 Wp Mono Bifacial Non DCR-PREMIER" in str(combined.get('item_name')):
-                          combined['rate'] = RATE_545_NON_DCR
-                          combined['amount'] = iqty * RATE_545_NON_DCR
-                      elif "540 Wp Mono Bifacial DCR-PREMIER" in str(combined.get('item_name')):
-                          combined['rate'] = RATE_540_DCR
-                          combined['amount'] = iqty * RATE_540_DCR
+                      if "545 Wp Mono Bifacial Non DCR-PREMIER" in str(row_data.get('item_name')):
+                          row_data['rate'] = RATE_545_NON_DCR
+                          row_data['amount'] = iqty * RATE_545_NON_DCR
+                      elif "540 Wp Mono Bifacial DCR-PREMIER" in str(row_data.get('item_name')):
+                          row_data['rate'] = RATE_540_DCR
+                          row_data['amount'] = iqty * RATE_540_DCR
 
-                      merged.append(combined)
+                      merged.append(row_data)
 
-          # 4. SAVE FINAL CSV WITH SPECIFIC COLUMN ORDER
+          # 5. CONSTRUCT FINAL HEADER & SAVE
           if merged:
-              # Final Header sequence: OMS Base -> DN Item Details -> Rest of OMS
+              # Start with Base OMS -> Then DN Columns -> Then everything else
               existing_keys = list(merged[0].keys())
-              final_column_order = oms_base_headers + dn_headers
+              final_order = oms_base_headers + dn_headers
               for k in existing_keys:
-                  if k not in final_column_order:
-                      final_column_order.append(k)
+                  if k not in final_order:
+                      final_order.append(k)
 
               with open("mastersheet.csv", "w", newline="", encoding='utf-8') as f:
-                  writer = csv.DictWriter(f, fieldnames=final_column_order, extrasaction='ignore')
+                  writer = csv.DictWriter(f, fieldnames=final_order, extrasaction='ignore')
                   writer.writeheader()
                   writer.writerows(merged)
-              print(f"🚀 Success! Created mastersheet.csv with {len(merged)} rows (Flat Join).")
+              print(f"✅ Success! Created itemized mastersheet.csv with {len(merged)} rows.")
           EOF
 
       - name: Commit and Push
