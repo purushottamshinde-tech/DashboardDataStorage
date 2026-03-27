@@ -1,4 +1,4 @@
-name: 🤖 Metabase to GitHub Sync (Data Fix)
+name: 🤖 Metabase to GitHub Sync (Optimized)
 
 on:
   schedule:
@@ -10,117 +10,202 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-        
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
-            
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-            
+
       - name: Install dependencies
         run: pip install requests
-            
+
       - name: Run Fetch, Merge and Strip
         run: |
           python3 << 'EOF'
           import requests
           import csv
+          import gzip
+          import shutil
+          import os
           from io import StringIO
 
-          # --- CONFIG ---
+          # ──────────────────────────────────────────────
+          # CONFIG
+          # ──────────────────────────────────────────────
           METABASE_URL = "https://metabase-lighthouse.solarsquare.in"
-          USERNAME = "devika.g@solarsquare.in"
-          PASSWORD = "Devika@2025"
-          OMS_CARD_ID = 2154
-          DN_DUMP_CARD_ID = 2106
-          
-          RATE_545_NON_DCR = 8134.52
-          RATE_540_DCR = 12065.00
+          USERNAME     = "devika.g@solarsquare.in"
+          PASSWORD     = "Devika@2025"
+          OMS_CARD_ID  = 2154
+          DN_CARD_ID   = 2106
 
+          RATE_545_NON_DCR = 8134.52
+          RATE_540_DCR     = 12065.00
+
+          # ──────────────────────────────────────────────
+          # ONLY THESE COLUMNS ARE KEPT FROM EACH SOURCE
+          # (exact header names as they come from Metabase)
+          # ──────────────────────────────────────────────
+
+          # OMS columns to keep  →  rename to final name
+          OMS_COLS = {
+              'SSE ID'                      : 'SSE ID',
+              'Installation Completion Date': 'Date',
+              'Cell Name'                   : 'Cluster',
+              'Final Revenue'               : 'Revenue',
+              'Final Revenue Excl. GST'     : 'Revenue Excl GST',
+          }
+
+          # DN columns to keep  →  rename to final name
+          # Adjust left-hand keys if Metabase exports different header names
+          DN_COLS = {
+              'customer'                   : 'SSE ID',          # join key
+              'item_code'                  : 'Item Code',
+              'item_name'                  : 'Item Name',
+              'custom_item_category'       : 'Item Category',
+              'custom_item_subcategory'    : 'Item Subcategory',
+              'qty'                        : 'Qty',
+              'rate'                       : 'Rate',
+              'amount'                     : 'Amount',
+          }
+
+          # Final column order in mastersheet
+          FINAL_HEADERS = [
+              'SSE ID', 'Date', 'Cluster',
+              'Revenue', 'Revenue Excl GST',
+              'Item Code', 'Item Name', 'Item Category', 'Item Subcategory',
+              'Qty', 'Rate', 'Amount',
+          ]
+
+          # ──────────────────────────────────────────────
+          # HELPERS
+          # ──────────────────────────────────────────────
           def get_session():
-              res = requests.post(f"{METABASE_URL}/api/session", json={"username": USERNAME, "password": PASSWORD})
+              res = requests.post(
+                  f"{METABASE_URL}/api/session",
+                  json={"username": USERNAME, "password": PASSWORD},
+                  timeout=60
+              )
+              res.raise_for_status()
               return res.json()['id']
 
           def fetch_csv(sid, cid):
-              res = requests.post(f"{METABASE_URL}/api/card/{cid}/query/csv", headers={"X-Metabase-Session": sid})
+              res = requests.post(
+                  f"{METABASE_URL}/api/card/{cid}/query/csv",
+                  headers={"X-Metabase-Session": sid},
+                  timeout=120
+              )
+              res.raise_for_status()
               return res.text
 
+          def slim(row, col_map):
+              """Return a new dict with only the columns in col_map, renamed."""
+              return {new: str(row.get(old, '')).strip() for old, new in col_map.items()}
+
+          # ──────────────────────────────────────────────
+          # FETCH  (full CSV downloaded once, slimmed in memory)
+          # ──────────────────────────────────────────────
           session = get_session()
-          print("📥 Downloading OMS and DN Data...")
-          oms_data = list(csv.DictReader(StringIO(fetch_csv(session, OMS_CARD_ID))))
-          dn_data = list(csv.DictReader(StringIO(fetch_csv(session, DN_DUMP_CARD_ID))))
+          print("📥 Downloading OMS data …")
+          raw_oms = fetch_csv(session, OMS_CARD_ID)
+          print("📥 Downloading DN data …")
+          raw_dn  = fetch_csv(session, DN_CARD_ID)
 
-          # 1. Map DN Items (Clean the 'customer' key to match 'SSE ID')
-          dn_lookup = {}
-          for row in dn_data:
-              # We clean the ID to ensure "SSE001" matches "SSE001 "
-              sid = str(row.get('customer', '')).strip().upper()
-              if sid:
-                  if sid not in dn_lookup: dn_lookup[sid] = []
-                  dn_lookup[sid].append(row)
+          # ──────────────────────────────────────────────
+          # SLIM EACH DATASET  (drop every unwanted column NOW)
+          # ──────────────────────────────────────────────
+          oms_rows = [slim(r, OMS_COLS) for r in csv.DictReader(StringIO(raw_oms))]
+          dn_rows  = [slim(r, DN_COLS)  for r in csv.DictReader(StringIO(raw_dn))]
 
-          # 2. THE 12 COLUMNS FROM YOUR SCREENSHOT
-          final_headers = [
-              'SSE ID', 'Installation Completion Date', 'Cell Name', 
-              'Final Revenue', 'Final Revenue Excl. GST',
-              'item_code', 'item_name', 'item_category', 'item_subcategory', 
-              'qty', 'rate', 'amount'
-          ]
+          del raw_oms, raw_dn          # free memory
 
-          # 3. PERFORM THE JOIN
+          print(f"   OMS rows : {len(oms_rows):,}")
+          print(f"   DN rows  : {len(dn_rows):,}")
+
+          # ──────────────────────────────────────────────
+          # BUILD DN LOOKUP  keyed by SSE ID (upper-cased)
+          # ──────────────────────────────────────────────
+          dn_lookup: dict[str, list] = {}
+          for row in dn_rows:
+              key = row['SSE ID'].upper()
+              dn_lookup.setdefault(key, []).append(row)
+
+          del dn_rows                  # free memory
+
+          # ──────────────────────────────────────────────
+          # MERGE
+          # ──────────────────────────────────────────────
           merged = []
-          for oms_row in oms_data:
-              # Clean the OMS ID to match the DN ID
-              sse_id = str(oms_row.get('SSE ID', '')).strip().upper()
-              items = dn_lookup.get(sse_id, [])
+          for oms in oms_rows:
+              key    = oms['SSE ID'].upper()
+              items  = dn_lookup.get(key, [])
 
               if not items:
-                  # If no match found, we still create 1 row so the OMS data is visible
-                  new_row = {h: oms_row.get(h, '') for h in final_headers}
-                  merged.append(new_row)
+                  # OMS-only row – DN fields left blank
+                  row = {h: oms.get(h, '') for h in FINAL_HEADERS}
+                  merged.append(row)
               else:
-                  for item in items:
-                      # Create a row for EVERY item in the delivery note
-                      new_row = {h: oms_row.get(h, '') for h in final_headers}
-                      
-                      # Map DN details into the specific columns
-                      new_row['item_code'] = item.get('item_code', '')
-                      new_row['item_name'] = item.get('item_name', '')
-                      new_row['item_category'] = item.get('item_category', '')
-                      new_row['item_subcategory'] = item.get('item_subcategory', '')
-                      new_row['qty'] = item.get('qty', '')
-                      new_row['rate'] = item.get('rate', '')
-                      new_row['amount'] = item.get('amount', '')
+                  for dn in items:
+                      row = {h: oms.get(h, '') for h in FINAL_HEADERS}
 
-                      # 4. March 2026 RATE CORRECTION
+                      row['Item Code']       = dn['Item Code']
+                      row['Item Name']       = dn['Item Name']
+                      row['Item Category']   = dn['Item Category']
+                      row['Item Subcategory']= dn['Item Subcategory']
+                      row['Qty']             = dn['Qty']
+                      row['Rate']            = dn['Rate']
+                      row['Amount']          = dn['Amount']
+
+                      # ── Rate correction for specific modules ──
                       try:
-                          iqty = float(new_row['qty']) if new_row['qty'] else 0
-                          if "545 Wp Mono Bifacial Non DCR-PREMIER" in str(new_row['item_name']):
-                              new_row['rate'] = RATE_545_NON_DCR
-                              new_row['amount'] = iqty * RATE_545_NON_DCR
-                          elif "540 Wp Mono Bifacial DCR-PREMIER" in str(new_row['item_name']):
-                              new_row['rate'] = RATE_540_DCR
-                              new_row['amount'] = iqty * RATE_540_DCR
-                      except:
+                          qty = float(row['Qty']) if row['Qty'] else 0
+                          name = row['Item Name']
+                          if "545 Wp Mono Bifacial Non DCR-PREMIER" in name:
+                              row['Rate']   = RATE_545_NON_DCR
+                              row['Amount'] = qty * RATE_545_NON_DCR
+                          elif "540 Wp Mono Bifacial DCR-PREMIER" in name:
+                              row['Rate']   = RATE_540_DCR
+                              row['Amount'] = qty * RATE_540_DCR
+                      except Exception:
                           pass
 
-                      merged.append(new_row)
+                      merged.append(row)
 
-          # 5. SAVE
-          with open("mastersheet.csv", "w", newline="", encoding='utf-8') as f:
-              writer = csv.DictWriter(f, fieldnames=final_headers, extrasaction='ignore')
+          print(f"✅ Merged rows : {len(merged):,}")
+
+          # ──────────────────────────────────────────────
+          # WRITE  →  CSV  +  GZIP  (keeps both in repo)
+          # The .csv.gz is ~5-10× smaller; use it in your
+          # dashboard instead of the raw CSV when possible.
+          # ──────────────────────────────────────────────
+          CSV_PATH = "mastersheet.csv"
+          GZ_PATH  = "mastersheet.csv.gz"
+
+          with open(CSV_PATH, "w", newline="", encoding="utf-8") as f:
+              writer = csv.DictWriter(f, fieldnames=FINAL_HEADERS, extrasaction='ignore')
               writer.writeheader()
               writer.writerows(merged)
-          print(f"🚀 Success! Processed {len(merged)} rows into mastersheet.csv")
+
+          # Compress for storage
+          with open(CSV_PATH, 'rb') as f_in, gzip.open(GZ_PATH, 'wb') as f_out:
+              shutil.copyfileobj(f_in, f_out)
+
+          csv_mb = os.path.getsize(CSV_PATH) / 1_048_576
+          gz_mb  = os.path.getsize(GZ_PATH)  / 1_048_576
+          print(f"📦 mastersheet.csv      : {csv_mb:.2f} MB")
+          print(f"📦 mastersheet.csv.gz   : {gz_mb:.2f} MB  (use this in dashboard)")
+
+          if csv_mb > 90:
+              print("⚠️  WARNING: CSV still >90 MB — consider date-range filtering in Metabase.")
           EOF
 
       - name: Commit and Push
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add mastersheet.csv
-          git commit -m "Auto-update: $(date)" || echo "No changes"
+          git add mastersheet.csv mastersheet.csv.gz
+          git diff --cached --quiet || git commit -m "Auto-update: $(date +'%Y-%m-%d %H:%M')"
           git push origin main
