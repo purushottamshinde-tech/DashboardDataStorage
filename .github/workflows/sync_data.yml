@@ -1,4 +1,4 @@
-name: 🤖 Triple-File Sync (Final Data Fix)
+name: 🤖 Metabase to GitHub Sync
 
 on:
   schedule:
@@ -10,116 +10,237 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-        
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
-            
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-            
+
       - name: Install dependencies
         run: pip install requests
-            
-      - name: Fetch, Merge, and Save
+
+      - name: Fetch, Merge and Save
         run: |
           python3 << 'EOF'
-          import requests
-          import csv
-          import gzip
-          import re
+          import requests, csv, gzip, shutil, os, json
           from io import StringIO
+          from datetime import datetime, timezone
 
-          # --- CONFIG ---
-          METABASE_URL = "https://metabase-lighthouse.solarsquare.in"
-          USERNAME = "devika.g@solarsquare.in"
-          PASSWORD = "Devika@2025"
-          OMS_CARD_ID = 2154
-          DN_DUMP_CARD_ID = 2106
-          
-          def get_session():
-              res = requests.post(f"{METABASE_URL}/api/session", json={"username": USERNAME, "password": PASSWORD})
-              return res.json()['id']
+          # ════════════════════════════════════════════════════════
+          # CONFIG
+          # ════════════════════════════════════════════════════════
+          METABASE_URL     = "https://metabase-lighthouse.solarsquare.in"
+          USERNAME         = "devika.g@solarsquare.in"
+          PASSWORD         = "Devika@2025"
+          OMS_CARD_ID      = 2154
+          DN_CARD_ID       = 2106
+          RATE_545_NON_DCR = 8134.52
+          RATE_540_DCR     = 12065.00
 
-          def fetch_csv(sid, cid):
-              res = requests.post(f"{METABASE_URL}/api/card/{cid}/query/csv", headers={"X-Metabase-Session": sid})
-              return res.text
+          # ════════════════════════════════════════════════════════
+          # COLUMNS TO KEEP — left = Metabase header, right = output name
+          # ════════════════════════════════════════════════════════
+          OMS_COLS = {
+              'SSE ID'                      : 'SSE ID',
+              'Installation Completion Date': 'Installation Completion Date',
+              'Cell Name'                   : 'Cell Name',
+              'City'                        : 'City',
+              'State'                       : 'State',
+              'Project Size (kW)'           : 'Project Size (kW)',
+              'Offer Type'                  : 'Offer Type',
+              'Phase Connection'            : 'Phase Connection',
+              'Final Revenue'               : 'Final Revenue',
+              'Final Revenue Excl. GST'     : 'Final Revenue Excl. GST',
+          }
 
-          session = get_session()
-          raw_oms = fetch_csv(session, OMS_CARD_ID)
-          raw_dn = fetch_csv(session, DN_DUMP_CARD_ID)
+          DN_COLS = {
+              'customer'                : 'DN_SSE_ID',   # join key, dropped after merge
+              'posting_date'            : 'posting_date',
+              'item_code'               : 'item_code',
+              'item_name'               : 'item_name',
+              'custom_item_category'    : 'item_category',
+              'custom_item_subcategory' : 'item_subcategory',
+              'set_warehouse'           : 'set_warehouse',
+              'warehouse'               : 'warehouse',
+              'qty'                     : 'qty',
+              'uom'                     : 'uom',
+              'rate'                    : 'rate',
+              'amount'                  : 'amount',
+          }
 
-          # Save Compressed Backups
-          with gzip.open('oms_dump.csv.gz', 'wt') as f: f.write(raw_oms)
-          with gzip.open('dn_dump.csv.gz', 'wt') as f: f.write(raw_dn)
-
-          oms_rows = list(csv.DictReader(StringIO(raw_oms)))
-          dn_rows = list(csv.DictReader(StringIO(raw_dn)))
-
-          # 1. ORGANIZE DN DUMP BY CUSTOMER
-          dn_lookup = {}
-          for row in dn_rows:
-              # Use .strip() and .upper() to prevent invisible mismatches
-              cust_id = str(row.get('customer', '')).strip().upper()
-              if cust_id:
-                  if cust_id not in dn_lookup: dn_lookup[cust_id] = []
-                  dn_lookup[cust_id].append(row)
-
-          # 2. DEFINE OUTPUT HEADERS (Mapped to your requirements)
-          final_headers = [
-              'SSE ID', 'Date', 'Cluster', 'Final Revenue', 
-              'item_code', 'item_name', 'item_category', 'item_subcategory', 
-              'qty', 'rate', 'amount'
+          FINAL_HEADERS = [
+              'SSE ID', 'Installation Completion Date', 'Cell Name',
+              'City', 'State', 'Project Size (kW)', 'Offer Type', 'Phase Connection',
+              'Final Revenue', 'Final Revenue Excl. GST',
+              'posting_date', 'item_code', 'item_name', 'item_category',
+              'item_subcategory', 'set_warehouse', 'warehouse',
+              'qty', 'uom', 'rate', 'amount',
           ]
 
-          merged = []
-          for oms_row in oms_rows:
-              # Get the ID from OMS card
-              sse_id = str(oms_row.get('SSE ID', '')).strip().upper()
-              
-              # Try to find match in DN lookup
-              items = dn_lookup.get(sse_id, [])
+          # ════════════════════════════════════════════════════════
+          # HELPERS
+          # ════════════════════════════════════════════════════════
+          def get_session():
+              r = requests.post(
+                  f"{METABASE_URL}/api/session",
+                  json={"username": USERNAME, "password": PASSWORD},
+                  timeout=60
+              )
+              r.raise_for_status()
+              return r.json()['id']
 
-              # Prepare Base Data (OMS)
-              base_data = {
-                  'SSE ID': sse_id,
-                  'Date': oms_row.get('Installation Completion Date'),
-                  'Cluster': oms_row.get('Cell Name'),
-                  'Final Revenue': oms_row.get('Final Revenue')
-              }
+          def fetch_csv(sid, cid):
+              r = requests.post(
+                  f"{METABASE_URL}/api/card/{cid}/query/csv",
+                  headers={"X-Metabase-Session": sid},
+                  timeout=300
+              )
+              r.raise_for_status()
+              return r.text
+
+          def slim(row, col_map):
+              """Keep only wanted columns and rename them."""
+              return {new: str(row.get(old, '')).strip() for old, new in col_map.items()}
+
+          # ════════════════════════════════════════════════════════
+          # FETCH
+          # ════════════════════════════════════════════════════════
+          session = get_session()
+          print("📥 Downloading OMS data...")
+          raw_oms = fetch_csv(session, OMS_CARD_ID)
+          print("📥 Downloading DN dump...")
+          raw_dn  = fetch_csv(session, DN_CARD_ID)
+
+          # Print actual headers so you can verify column names match
+          print(f"🔍 OMS headers: {csv.DictReader(StringIO(raw_oms)).fieldnames}")
+          print(f"🔍 DN  headers: {csv.DictReader(StringIO(raw_dn)).fieldnames}")
+
+          # ════════════════════════════════════════════════════════
+          # SLIM — drop all unwanted columns immediately after download
+          # ════════════════════════════════════════════════════════
+          oms_rows = [slim(r, OMS_COLS) for r in csv.DictReader(StringIO(raw_oms))]
+          dn_rows  = [slim(r, DN_COLS)  for r in csv.DictReader(StringIO(raw_dn))]
+          del raw_oms, raw_dn  # free memory
+
+          print(f"   OMS rows : {len(oms_rows):,}")
+          print(f"   DN rows  : {len(dn_rows):,}")
+
+          # ════════════════════════════════════════════════════════
+          # BUILD DN LOOKUP
+          # OMS SSE IDs are source of truth — DN rows with no
+          # matching OMS record are discarded immediately.
+          # This is the main reason row count was exploding.
+          # ════════════════════════════════════════════════════════
+          valid_ids = {r['SSE ID'].upper() for r in oms_rows if r['SSE ID'].strip()}
+
+          dn_lookup = {}
+          skipped   = 0
+          for row in dn_rows:
+              key = row['DN_SSE_ID'].upper()
+              if key not in valid_ids:
+                  skipped += 1
+                  continue
+              dn_lookup.setdefault(key, []).append(row)
+          del dn_rows  # free memory
+
+          matched = sum(len(v) for v in dn_lookup.values())
+          print(f"   DN matched  : {matched:,}")
+          print(f"   DN discarded: {skipped:,}  (no OMS record = excluded)")
+
+          # ════════════════════════════════════════════════════════
+          # MERGE
+          # ════════════════════════════════════════════════════════
+          merged = []
+          for oms in oms_rows:
+              key   = oms['SSE ID'].upper()
+              items = dn_lookup.get(key, [])
 
               if not items:
-                  # IMPORTANT: Even if no items, we ADD the OMS row so you get data!
-                  row_data = {**base_data}
-                  for h in final_headers[4:]: row_data[h] = ''
-                  merged.append(row_data)
+                  # OMS row with no DN — keep it, DN columns blank
+                  merged.append({h: oms.get(h, '') for h in FINAL_HEADERS})
               else:
-                  for item in items:
-                      row_data = {**base_data}
-                      row_data['item_code'] = item.get('item_code', '')
-                      row_data['item_name'] = item.get('item_name', '')
-                      row_data['item_category'] = item.get('item_category', '')
-                      row_data['item_subcategory'] = item.get('item_subcategory', '')
-                      row_data['qty'] = item.get('qty', '')
-                      row_data['rate'] = item.get('rate', '')
-                      row_data['amount'] = item.get('amount', '')
-                      merged.append(row_data)
+                  for dn in items:
+                      row = {h: oms.get(h, '') for h in FINAL_HEADERS}
+                      for col in ['posting_date', 'item_code', 'item_name', 'item_category',
+                                  'item_subcategory', 'set_warehouse', 'warehouse',
+                                  'qty', 'uom', 'rate', 'amount']:
+                          row[col] = dn[col]
 
-          # 4. SAVE MASTERSHEET
-          with open("mastersheet.csv", "w", newline="", encoding='utf-8') as f:
-              writer = csv.DictWriter(f, fieldnames=final_headers, extrasaction='ignore')
-              writer.writeheader()
-              writer.writerows(merged)
-          
-          print(f"✅ Success! Created mastersheet.csv with {len(merged)} rows.")
+                      # Rate correction for specific module SKUs
+                      try:
+                          q = float(row['qty']) if row['qty'] else 0
+                          n = row['item_name']
+                          if "545 Wp Mono Bifacial Non DCR-PREMIER" in n:
+                              row['rate']   = RATE_545_NON_DCR
+                              row['amount'] = round(q * RATE_545_NON_DCR, 2)
+                          elif "540 Wp Mono Bifacial DCR-PREMIER" in n:
+                              row['rate']   = RATE_540_DCR
+                              row['amount'] = round(q * RATE_540_DCR, 2)
+                      except Exception:
+                          pass
+
+                      merged.append(row)
+
+          print(f"✅ Final merged rows: {len(merged):,}")
+
+          # ════════════════════════════════════════════════════════
+          # WRITE
+          # Raw CSV → /tmp  (never committed to git)
+          # data.csv.gz     → repo root (committed, dashboard fetches this)
+          # data_meta.json  → repo root (dashboard reads for timestamp)
+          # ════════════════════════════════════════════════════════
+          TMP  = "/tmp/data_tmp.csv"
+          GZ   = "data.csv.gz"
+          META = "data_meta.json"
+
+          with open(TMP, "w", newline="", encoding="utf-8") as f:
+              w = csv.DictWriter(f, fieldnames=FINAL_HEADERS, extrasaction='ignore')
+              w.writeheader()
+              w.writerows(merged)
+
+          raw_mb = os.path.getsize(TMP) / 1_048_576
+          print(f"📦 Raw CSV (not pushed) : {raw_mb:.2f} MB")
+
+          with open(TMP, 'rb') as f_in, gzip.open(GZ, 'wb', compresslevel=9) as f_out:
+              shutil.copyfileobj(f_in, f_out)
+
+          gz_mb = os.path.getsize(GZ) / 1_048_576
+          print(f"📦 data.csv.gz          : {gz_mb:.2f} MB  ← this is what gets pushed")
+
+          # Meta JSON — dashboard reads this for last-updated info
+          meta = {
+              "last_updated" : datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "total_rows"   : len(merged),
+              "oms_rows"     : len(oms_rows),
+              "dn_matched"   : matched,
+              "dn_skipped"   : skipped,
+              "gz_mb"        : round(gz_mb, 2),
+          }
+          with open(META, "w") as f:
+              json.dump(meta, f, indent=2)
+          print(f"📋 data_meta.json : {meta}")
+
+          if gz_mb > 90:
+              print("⚠️  WARNING: gz still >90MB. Add a date filter to your DN Metabase card.")
+          else:
+              print("✅ File size OK for GitHub (limit 100MB).")
           EOF
 
       - name: Commit and Push
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add mastersheet.csv oms_dump.csv.gz dn_dump.csv.gz
-          git commit -m "Auto-update: $(date)" || echo "No changes"
+
+          # Remove any previously tracked large files
+          git rm --cached mastersheet.csv    2>/dev/null || true
+          git rm --cached mastersheet.csv.gz 2>/dev/null || true
+
+          # Only commit the compressed file + meta
+          git add data.csv.gz data_meta.json
+
+          git diff --cached --quiet || git commit -m "Auto-update: $(date +'%Y-%m-%d %H:%M UTC')"
           git push origin main
