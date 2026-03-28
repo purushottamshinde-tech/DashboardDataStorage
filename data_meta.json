@@ -1,8 +1,8 @@
 {
-  "last_updated": "2026-03-28T15:55:24Z",
-  "total_rows": 706792,
+  "last_updated": "2026-03-28T17:06:45Z",
+  "total_rows": 706793,
   "oms_rows": 21280,
-  "dn_matched": 706764,
-  "dn_skipped": 136915,
+  "dn_matched": 706765,
+  "dn_skipped": 137810,
   "gz_mb": 12.16
 }
