@@ -30,22 +30,18 @@ jobs:
           from io import StringIO
           from datetime import datetime, timezone
 
-          # ════════════════════════════════════════════════════════
-          # CONFIG
-          # ════════════════════════════════════════════════════════
+          # --- CONFIG ---
           METABASE_URL     = "https://metabase-lighthouse.solarsquare.in"
           USERNAME         = "devika.g@solarsquare.in"
           PASSWORD         = "Devika@2025"
           OMS_CARD_ID      = 2154
           DN_CARD_ID       = 2106
           RATE_545_NON_DCR = 8134.52
-          RATE_540_DCR     = 12065.00
+          RATE_540_DCR      = 12065.00
 
-          # ════════════════════════════════════════════════════════
-          # COLUMNS TO KEEP — left = Metabase header, right = output name
-          # ════════════════════════════════════════════════════════
+          # --- COLUMN MAPPING ---
           OMS_COLS = {
-              'SSE ID'                      : 'SSE ID',
+              'SSE ID'                       : 'SSE ID',
               'Installation Completion Date': 'Installation Completion Date',
               'Cell Name'                   : 'Cell Name',
               'City'                        : 'City',
@@ -58,18 +54,18 @@ jobs:
           }
 
           DN_COLS = {
-              'customer'                : 'DN_SSE_ID',   # join key, dropped after merge
-              'posting_date'            : 'posting_date',
-              'item_code'               : 'item_code',
-              'item_name'               : 'item_name',
-              'custom_item_category'    : 'item_category',
-              'custom_item_subcategory' : 'item_subcategory',
-              'set_warehouse'           : 'set_warehouse',
-              'warehouse'               : 'warehouse',
-              'qty'                     : 'qty',
-              'uom'                     : 'uom',
-              'rate'                    : 'rate',
-              'amount'                  : 'amount',
+              'customer'        : 'DN_SSE_ID',
+              'posting_date'    : 'posting_date',
+              'item_code'       : 'item_code',
+              'item_name'       : 'item_name',
+              'item_category'   : 'item_category',   # Matches SQL Alias
+              'item_subcategory': 'item_subcategory', # Matches SQL Alias
+              'set_warehouse'   : 'set_warehouse',
+              'warehouse'       : 'warehouse',
+              'qty'             : 'qty',
+              'uom'             : 'uohm',
+              'rate'            : 'rate',
+              'amount'          : 'amount',
           }
 
           FINAL_HEADERS = [
@@ -81,96 +77,49 @@ jobs:
               'qty', 'uom', 'rate', 'amount',
           ]
 
-          # ════════════════════════════════════════════════════════
-          # HELPERS
-          # ════════════════════════════════════════════════════════
+          # --- HELPERS ---
           def get_session():
-              r = requests.post(
-                  f"{METABASE_URL}/api/session",
-                  json={"username": USERNAME, "password": PASSWORD},
-                  timeout=60
-              )
+              r = requests.post(f"{METABASE_URL}/api/session", json={"username": USERNAME, "password": PASSWORD}, timeout=60)
               r.raise_for_status()
               return r.json()['id']
 
           def fetch_csv(sid, cid):
-              r = requests.post(
-                  f"{METABASE_URL}/api/card/{cid}/query/csv",
-                  headers={"X-Metabase-Session": sid},
-                  timeout=300
-              )
+              r = requests.post(f"{METABASE_URL}/api/card/{cid}/query/csv", headers={"X-Metabase-Session": sid}, timeout=300)
               r.raise_for_status()
               return r.text
 
           def slim(row, col_map):
-              """Keep only wanted columns and rename them."""
               return {new: str(row.get(old, '')).strip() for old, new in col_map.items()}
 
-          # ════════════════════════════════════════════════════════
-          # FETCH
-          # ════════════════════════════════════════════════════════
+          # --- EXECUTION ---
           session = get_session()
-          print("📥 Downloading OMS data...")
           raw_oms = fetch_csv(session, OMS_CARD_ID)
-          print("📥 Downloading DN dump...")
           raw_dn  = fetch_csv(session, DN_CARD_ID)
 
-          # Print actual headers so you can verify column names match
-          print(f"🔍 OMS headers: {csv.DictReader(StringIO(raw_oms)).fieldnames}")
-          print(f"🔍 DN  headers: {csv.DictReader(StringIO(raw_dn)).fieldnames}")
-
-          # ════════════════════════════════════════════════════════
-          # SLIM — drop all unwanted columns immediately after download
-          # ════════════════════════════════════════════════════════
           oms_rows = [slim(r, OMS_COLS) for r in csv.DictReader(StringIO(raw_oms))]
           dn_rows  = [slim(r, DN_COLS)  for r in csv.DictReader(StringIO(raw_dn))]
-          del raw_oms, raw_dn  # free memory
-
-          print(f"   OMS rows : {len(oms_rows):,}")
-          print(f"   DN rows  : {len(dn_rows):,}")
-
-          # ════════════════════════════════════════════════════════
-          # BUILD DN LOOKUP
-          # OMS SSE IDs are source of truth — DN rows with no
-          # matching OMS record are discarded immediately.
-          # This is the main reason row count was exploding.
-          # ════════════════════════════════════════════════════════
+          
           valid_ids = {r['SSE ID'].upper() for r in oms_rows if r['SSE ID'].strip()}
-
           dn_lookup = {}
-          skipped   = 0
           for row in dn_rows:
               key = row['DN_SSE_ID'].upper()
-              if key not in valid_ids:
-                  skipped += 1
-                  continue
-              dn_lookup.setdefault(key, []).append(row)
-          del dn_rows  # free memory
+              if key in valid_ids:
+                  dn_lookup.setdefault(key, []).append(row)
 
-          matched = sum(len(v) for v in dn_lookup.values())
-          print(f"   DN matched  : {matched:,}")
-          print(f"   DN discarded: {skipped:,}  (no OMS record = excluded)")
-
-          # ════════════════════════════════════════════════════════
-          # MERGE
-          # ════════════════════════════════════════════════════════
           merged = []
           for oms in oms_rows:
               key   = oms['SSE ID'].upper()
               items = dn_lookup.get(key, [])
 
               if not items:
-                  # OMS row with no DN — keep it, DN columns blank
                   merged.append({h: oms.get(h, '') for h in FINAL_HEADERS})
               else:
                   for dn in items:
                       row = {h: oms.get(h, '') for h in FINAL_HEADERS}
-                      for col in ['posting_date', 'item_code', 'item_name', 'item_category',
-                                  'item_subcategory', 'set_warehouse', 'warehouse',
-                                  'qty', 'uom', 'rate', 'amount']:
-                          row[col] = dn[col]
+                      for col in DN_COLS.values():
+                          if col in row: row[col] = dn[col]
 
-                      # Rate correction for specific module SKUs
+                      # Rate correction
                       try:
                           q = float(row['qty']) if row['qty'] else 0
                           n = row['item_name']
@@ -180,19 +129,10 @@ jobs:
                           elif "540 Wp Mono Bifacial DCR-PREMIER" in n:
                               row['rate']   = RATE_540_DCR
                               row['amount'] = round(q * RATE_540_DCR, 2)
-                      except Exception:
-                          pass
-
+                      except: pass
                       merged.append(row)
 
-          print(f"✅ Final merged rows: {len(merged):,}")
-
-          # ════════════════════════════════════════════════════════
-          # WRITE
-          # Raw CSV → /tmp  (never committed to git)
-          # data.csv.gz     → repo root (committed, dashboard fetches this)
-          # data_meta.json  → repo root (dashboard reads for timestamp)
-          # ════════════════════════════════════════════════════════
+          # --- STORAGE ---
           TMP  = "/tmp/data_tmp.csv"
           GZ   = "data.csv.gz"
           META = "data_meta.json"
@@ -202,45 +142,22 @@ jobs:
               w.writeheader()
               w.writerows(merged)
 
-          raw_mb = os.path.getsize(TMP) / 1_048_576
-          print(f"📦 Raw CSV (not pushed) : {raw_mb:.2f} MB")
-
           with open(TMP, 'rb') as f_in, gzip.open(GZ, 'wb', compresslevel=9) as f_out:
               shutil.copyfileobj(f_in, f_out)
 
-          gz_mb = os.path.getsize(GZ) / 1_048_576
-          print(f"📦 data.csv.gz          : {gz_mb:.2f} MB  ← this is what gets pushed")
-
-          # Meta JSON — dashboard reads this for last-updated info
           meta = {
               "last_updated" : datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
               "total_rows"   : len(merged),
               "oms_rows"     : len(oms_rows),
-              "dn_matched"   : matched,
-              "dn_skipped"   : skipped,
-              "gz_mb"        : round(gz_mb, 2),
           }
           with open(META, "w") as f:
               json.dump(meta, f, indent=2)
-          print(f"📋 data_meta.json : {meta}")
-
-          if gz_mb > 90:
-              print("⚠️  WARNING: gz still >90MB. Add a date filter to your DN Metabase card.")
-          else:
-              print("✅ File size OK for GitHub (limit 100MB).")
           EOF
 
       - name: Commit and Push
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-
-          # Remove any previously tracked large files
-          git rm --cached mastersheet.csv    2>/dev/null || true
-          git rm --cached mastersheet.csv.gz 2>/dev/null || true
-
-          # Only commit the compressed file + meta
           git add data.csv.gz data_meta.json
-
           git diff --cached --quiet || git commit -m "Auto-update: $(date +'%Y-%m-%d %H:%M UTC')"
           git push origin main
