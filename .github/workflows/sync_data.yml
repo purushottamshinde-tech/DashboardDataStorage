@@ -1,170 +1,325 @@
 name: 🤖 Metabase to GitHub Sync
 
+
+
 on:
+
   schedule:
+
     - cron: '*/30 * * * *'
+
   workflow_dispatch:
 
+
+
 jobs:
+
   sync:
+
     runs-on: ubuntu-latest
+
     permissions:
+
       contents: write
 
+
+
     steps:
+
       - name: Checkout repo
+
         uses: actions/checkout@v4
 
+
+
       - name: Set up Python
+
         uses: actions/setup-python@v5
+
         with:
+
           python-version: '3.10'
 
+
+
       - name: Install dependencies
+
         run: pip install requests
 
+
+
       - name: Fetch, Merge and Save
+
         run: |
+
           python3 << 'EOF'
+
           import requests, csv, gzip, shutil, os, json
+
           from io import StringIO
+
           from datetime import datetime, timezone
 
+
+
           # --- CONFIG ---
+
           METABASE_URL     = "https://metabase-lighthouse.solarsquare.in"
+
           USERNAME         = "devika.g@solarsquare.in"
+
           PASSWORD         = "Devika@2025"
+
           OMS_CARD_ID      = 2154
+
           DN_CARD_ID       = 2106
 
-          # --- METERING PRICE LOOKUP (As per Backend File) ---
-          METERING_PRICES = {
-              'PUNE': {'net_1ph': 1260, 'net_3ph': 2620, 'gen_1ph': 0, 'gen_3ph': 0},
-              'NASHIK': {'net_1ph': 1260, 'net_3ph': 2620, 'gen_1ph': 0, 'gen_3ph': 0},
-              'NAGPUR': {'net_1ph': 1260, 'net_3ph': 2620, 'gen_1ph': 0, 'gen_3ph': 0},
-              'BHOPAL': {'net_1ph': 0, 'net_3ph': 0, 'gen_1ph': 2841, 'gen_3ph': 4617},
-              'INDORE': {'net_1ph': 0, 'net_3ph': 0, 'gen_1ph': 6800, 'gen_3ph': 9050},
-              'GWALIOR': {'net_1ph': 0, 'net_3ph': 0, 'gen_1ph': 2841, 'gen_3ph': 4617},
-              'JAIPUR': {'net_1ph': 3050, 'net_3ph': 5650, 'gen_1ph': 3550, 'gen_3ph': 6650},
-              'LUCKNOW': {'net_1ph': 0, 'net_3ph': 0, 'gen_1ph': 1350, 'gen_3ph': 4350},
-              'CHENNAI': {'net_1ph': 0, 'net_3ph': 0, 'gen_1ph': 2763, 'gen_3ph': 5011}
-          }
+          RATE_545_NON_DCR = 8134.52
+
+          RATE_540_DCR      = 12065.00
+
+
 
           # --- COLUMN MAPPING ---
+
           OMS_COLS = {
-              'SSE ID': 'SSE ID',
+
+              'SSE ID'                       : 'SSE ID',
+
               'Installation Completion Date': 'Installation Completion Date',
-              'Cell Name': 'Cell Name',
-              'City': 'City',
-              'State': 'State',
-              'Project Size (kW)': 'Project Size (kW)',
-              'Offer Type': 'Offer Type',
-              'Phase Connection': 'Phase Connection',
-              'Final Revenue': 'Final Revenue',
-              'Final Revenue Excl. GST': 'Final Revenue Excl. GST',
+
+              'Cell Name'                   : 'Cell Name',
+
+              'City'                        : 'City',
+
+              'State'                       : 'State',
+
+              'Project Size (kW)'           : 'Project Size (kW)',
+
+              'Offer Type'                  : 'Offer Type',
+
+              'Phase Connection'            : 'Phase Connection',
+
+              'Final Revenue'               : 'Final Revenue',
+
+              'Final Revenue Excl. GST'     : 'Final Revenue Excl. GST',
+
           }
+
+
 
           DN_COLS = {
-              'customer': 'DN_SSE_ID',
-              'posting_date': 'posting_date',
-              'item_code': 'item_code',
-              'item_name': 'item_name',
-              'item_category': 'item_category',
-              'qty': 'qty',
-              'rate': 'rate',
-              'amount': 'amount',
+
+              'customer'        : 'DN_SSE_ID',
+
+              'posting_date'    : 'posting_date',
+
+              'item_code'       : 'item_code',
+
+              'item_name'       : 'item_name',
+
+              'item_category'   : 'item_category',   # Matches SQL Alias
+
+              'item_subcategory': 'item_subcategory', # Matches SQL Alias
+
+              'set_warehouse'   : 'set_warehouse',
+
+              'warehouse'       : 'warehouse',
+
+              'qty'             : 'qty',
+
+              'uom'             : 'uohm',
+
+              'rate'            : 'rate',
+
+              'amount'          : 'amount',
+
           }
 
-          FINAL_HEADERS = list(OMS_COLS.values()) + [
+
+
+          FINAL_HEADERS = [
+
+              'SSE ID', 'Installation Completion Date', 'Cell Name',
+
+              'City', 'State', 'Project Size (kW)', 'Offer Type', 'Phase Connection',
+
+              'Final Revenue', 'Final Revenue Excl. GST',
+
               'posting_date', 'item_code', 'item_name', 'item_category',
-              'qty', 'rate', 'amount', 'metering_config_cost'
+
+              'item_subcategory', 'set_warehouse', 'warehouse',
+
+              'qty', 'uom', 'rate', 'amount',
+
           ]
 
+
+
           # --- HELPERS ---
+
           def get_session():
+
               r = requests.post(f"{METABASE_URL}/api/session", json={"username": USERNAME, "password": PASSWORD}, timeout=60)
+
               r.raise_for_status()
+
               return r.json()['id']
 
+
+
           def fetch_csv(sid, cid):
+
               r = requests.post(f"{METABASE_URL}/api/card/{cid}/query/csv", headers={"X-Metabase-Session": sid}, timeout=300)
+
               r.raise_for_status()
+
               return r.text
 
+
+
+          def slim(row, col_map):
+
+              return {new: str(row.get(old, '')).strip() for old, new in col_map.items()}
+
+
+
           # --- EXECUTION ---
+
           session = get_session()
+
           raw_oms = fetch_csv(session, OMS_CARD_ID)
+
           raw_dn  = fetch_csv(session, DN_CARD_ID)
 
-          oms_rows = list(csv.DictReader(StringIO(raw_oms)))
-          dn_rows  = list(csv.DictReader(StringIO(raw_dn)))
 
-          # Create DN lookup grouped by customer
+
+          oms_rows = [slim(r, OMS_COLS) for r in csv.DictReader(StringIO(raw_oms))]
+
+          dn_rows  = [slim(r, DN_COLS)  for r in csv.DictReader(StringIO(raw_dn))]
+
+          
+
+          valid_ids = {r['SSE ID'].upper() for r in oms_rows if r['SSE ID'].strip()}
+
           dn_lookup = {}
-          for d in dn_rows:
-              cid = d.get('customer', '').strip().upper()
-              dn_lookup.setdefault(cid, []).append(d)
+
+          for row in dn_rows:
+
+              key = row['DN_SSE_ID'].upper()
+
+              if key in valid_ids:
+
+                  dn_lookup.setdefault(key, []).append(row)
+
+
 
           merged = []
-          for oms in oms_rows:
-              sse_id = oms.get('SSE ID', '').strip().upper()
-              city = oms.get('City', '').strip().upper()
-              phase = oms.get('Phase Connection', '').strip().lower()
-              
-              # Calculate Config Metering Cost
-              m_price = METERING_PRICES.get(city, {'net_1ph':0, 'net_3ph':0, 'gen_1ph':0, 'gen_3ph':0})
-              if 'single' in phase:
-                  config_cost = m_price['net_1ph'] + m_price['gen_1ph']
-              elif 'three' in phase:
-                  config_cost = m_price['net_3ph'] + m_price['gen_3ph']
-              else:
-                  config_cost = 0
 
-              items = dn_lookup.get(sse_id, [])
-              
-              base_row = {new: oms.get(old, '').strip() for old, new in OMS_COLS.items()}
-              base_row['metering_config_cost'] = config_cost
+          for oms in oms_rows:
+
+              key   = oms['SSE ID'].upper()
+
+              items = dn_lookup.get(key, [])
+
+
 
               if not items:
-                  merged.append({**base_row, 'item_name': 'NO DN FOUND', 'amount': 0})
+
+                  merged.append({h: oms.get(h, '') for h in FINAL_HEADERS})
+
               else:
+
                   for dn in items:
-                      row = base_row.copy()
-                      # Update DN fields
-                      row['posting_date'] = dn.get('posting_date', '')
-                      row['item_code'] = dn.get('item_code', '')
-                      row['item_name'] = dn.get('item_name', '')
-                      row['qty'] = dn.get('qty', 0)
-                      row['rate'] = dn.get('rate', 0)
-                      row['amount'] = dn.get('amount', 0)
-                      
-                      # Logic: Forced Metering Categorization
-                      iname = row['item_name'].upper()
-                      if "MODEM" in iname or "METER BOX" in iname:
-                          row['item_category'] = "Metering"
-                      else:
-                          row['item_category'] = dn.get('item_category', 'Other Items')
-                      
+
+                      row = {h: oms.get(h, '') for h in FINAL_HEADERS}
+
+                      for col in DN_COLS.values():
+
+                          if col in row: row[col] = dn[col]
+
+
+
+                      # Rate correction
+
+                      try:
+
+                          q = float(row['qty']) if row['qty'] else 0
+
+                          n = row['item_name']
+
+                          if "545 Wp Mono Bifacial Non DCR-PREMIER" in n:
+
+                              row['rate']   = RATE_545_NON_DCR
+
+                              row['amount'] = round(q * RATE_545_NON_DCR, 2)
+
+                          elif "540 Wp Mono Bifacial DCR-PREMIER" in n:
+
+                              row['rate']   = RATE_540_DCR
+
+                              row['amount'] = round(q * RATE_540_DCR, 2)
+
+                      except: pass
+
                       merged.append(row)
 
+
+
           # --- STORAGE ---
-          TMP = "data_merged.csv"
-          GZ  = "data.csv.gz"
+
+          TMP  = "/tmp/data_tmp.csv"
+
+          GZ   = "data.csv.gz"
+
+          META = "data_meta.json"
+
+
+
           with open(TMP, "w", newline="", encoding="utf-8") as f:
+
               w = csv.DictWriter(f, fieldnames=FINAL_HEADERS, extrasaction='ignore')
+
               w.writeheader()
+
               w.writerows(merged)
 
+
+
           with open(TMP, 'rb') as f_in, gzip.open(GZ, 'wb', compresslevel=9) as f_out:
+
               shutil.copyfileobj(f_in, f_out)
-          
-          os.remove(TMP)
+
+
+
+          meta = {
+
+              "last_updated" : datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+
+              "total_rows"   : len(merged),
+
+              "oms_rows"     : len(oms_rows),
+
+          }
+
+          with open(META, "w") as f:
+
+              json.dump(meta, f, indent=2)
+
           EOF
 
+
+
       - name: Commit and Push
+
         run: |
+
           git config --global user.name "github-actions[bot]"
+
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add data.csv.gz
-          git diff --cached --quiet || git commit -m "Auto-update COGS: $(date +'%Y-%m-%d %H:%M UTC')"
+
+          git add data.csv.gz data_meta.json
+
+          git diff --cached --quiet || git commit -m "Auto-update: $(date +'%Y-%m-%d %H:%M UTC')"
+
           git push origin main
