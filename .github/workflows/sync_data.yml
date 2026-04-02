@@ -74,9 +74,106 @@ jobs:
 
           DN_CARD_ID       = 2106
 
+          BACKEND_CARD_ID  = 9999   # ← TODO: Replace with your actual Backend card ID
+
           RATE_545_NON_DCR = 8134.52
 
           RATE_540_DCR      = 12065.00
+
+
+
+          # --- METERING LOOKUP TABLES ---
+          # Gen Meter rates by cluster (from Backend T:V range)
+          # Format: cluster -> (1ph_rate, 3ph_rate)
+          GEN_METER_RATES = {
+              'Pune':        (1260, 2620),
+              'Nashik':      (1260, 2620),
+              'Nagpur':      (1260, 2620),
+              'Aurangabad':  (1260, 2620),
+              'Jalgaon':     (1260, 2620),
+              'Ahmednagar':  (1260, 2620),
+              'Latur':       (1260, 2620),
+              'Kolhapur':    (1260, 2620),
+              'Mumbai':      (1260, 2620),
+              'Amravati':    (1260, 2620),
+              'Solapur':     (1260, 2620),
+              'Jaipur':      (3050, 5650),
+              'Ajmer':       (3050, 5650),
+              'Kota':        (3050, 5650),
+              'Bhopal':      (0,    0),
+              'Indore':      (0,    0),
+              'Jabalpur':    (0,    0),
+              'Gwalior':     (0,    0),
+              'Bengaluru':   (0,    0),
+              'Hyderabad':   (0,    0),
+              'Ahmedabad':   (0,    0),
+              'Surat':       (0,    0),
+              'Baroda':      (0,    0),
+              'Lucknow':     (0,    0),
+              'Kanpur':      (0,    0),
+              'Varanasi':    (0,    0),
+              'Noida':       (0,    0),
+              'NCR':         (0,    0),
+              'Kochi':       (0,    0),
+              'Chennai':     (0,    0),
+              'Agra':        (0,    0),
+              'Coimbatore':  (0,    0),
+          }
+
+          # Net Meter rates by cluster (from Backend Q:S range)
+          # Format: cluster -> (1ph_rate, 3ph_rate)
+          NET_METER_RATES = {
+              'Pune':        (0,     0),
+              'Nashik':      (0,     0),
+              'Nagpur':      (0,     0),
+              'Aurangabad':  (0,     0),
+              'Jalgaon':     (0,     0),
+              'Ahmednagar':  (0,     0),
+              'Latur':       (0,     0),
+              'Kolhapur':    (0,     0),
+              'Mumbai':      (0,     0),
+              'Amravati':    (0,     0),
+              'Solapur':     (0,     0),
+              'Bhopal':      (2841,  4617),
+              'Indore':      (6800,  9050),
+              'Jabalpur':    (9785, 14050),
+              'Gwalior':     (2841,  4617),
+              'Bengaluru':   (3250,  6376),
+              'Hyderabad':   (0,     0),
+              'Ahmedabad':   (0,     0),
+              'Surat':       (0,     0),
+              'Baroda':      (0,     0),
+              'Jaipur':      (3550,  6650),
+              'Ajmer':       (3550,  6650),
+              'Kota':        (3550,  6650),
+              'Lucknow':     (1350,  4350),
+              'Kanpur':      (1350,  4350),
+              'Varanasi':    (1350,  4350),
+              'Noida':       (1350,  4350),
+              'NCR':         (0,     0),
+              'Kochi':       (3250,  6376),
+              'Chennai':     (2763,  5011),
+              'Agra':        (1350,  4350),
+              'Coimbatore':  (2763,  5011),
+          }
+
+          # DN item names that count toward Metering COGS
+          METER_DN_ITEMS = {
+              'Communication Modem E 90 with Optical Cable',
+              'FRP Meter Box',
+              'Meter Box 400x300x150mm-SPARK',
+          }
+
+          # ERP category sort order
+          CATEGORY_ORDER = [
+              'Module', 'Junction Box', 'Prefab MMS', 'Metering', 'Cable Tray',
+              'Electrical BoS', 'Inverter', 'Earthing & LA', 'Tin Shed MMS',
+              'Conduit Pipe', 'Cables', 'Water Pipeline', 'Data Logger',
+              'Welded MMS', 'I&C Accessories', 'Fixed Assets', 'Roof Hugging MMS',
+              'SS NBW', 'Fixtures and Tools', 'Skylight Protection', 'Civil Work',
+              'Safety Lifeline', 'I&C KIT', 'Water Draining Clamp', 'WMS', 'Safety',
+          ]
+          CAT_RANK = {c: i for i, c in enumerate(CATEGORY_ORDER)}
 
 
 
@@ -118,9 +215,9 @@ jobs:
 
               'item_name'       : 'item_name',
 
-              'item_category'   : 'item_category',   # Matches SQL Alias
+              'item_category'   : 'item_category',
 
-              'item_subcategory': 'item_subcategory', # Matches SQL Alias
+              'item_subcategory': 'item_subcategory',
 
               'set_warehouse'   : 'set_warehouse',
 
@@ -133,6 +230,24 @@ jobs:
               'rate'            : 'rate',
 
               'amount'          : 'amount',
+
+          }
+
+          # Backend columns needed for metering
+          # Col indices based on Backend sheet structure (1-indexed):
+          #   Col 1  = SSEID
+          #   Col 13 = Inverter Phase
+          #   Col 14 = Sanctioned Phase
+          #   Col 15 = Cluster (used as lookup key for meter rates)
+          BACKEND_COLS = {
+
+              'SSEID'           : 'B_SSE_ID',
+
+              'Inverter Phase'  : 'inverter_phase',
+
+              'Sanction phase'  : 'sanction_phase',
+
+              'Cluster'         : 'b_cluster',
 
           }
 
@@ -184,24 +299,40 @@ jobs:
 
 
 
+          def safe_float(val, default=0.0):
+
+              try:
+                  return float(val)
+              except (ValueError, TypeError):
+                  return default
+
+
+
           # --- EXECUTION ---
 
-          session = get_session()
+          session   = get_session()
 
-          raw_oms = fetch_csv(session, OMS_CARD_ID)
+          raw_oms   = fetch_csv(session, OMS_CARD_ID)
 
-          raw_dn  = fetch_csv(session, DN_CARD_ID)
+          raw_dn    = fetch_csv(session, DN_CARD_ID)
+
+          raw_back  = fetch_csv(session, BACKEND_CARD_ID)
 
 
 
-          oms_rows = [slim(r, OMS_COLS) for r in csv.DictReader(StringIO(raw_oms))]
+          oms_rows  = [slim(r, OMS_COLS)     for r in csv.DictReader(StringIO(raw_oms))]
 
-          dn_rows  = [slim(r, DN_COLS)  for r in csv.DictReader(StringIO(raw_dn))]
+          dn_rows   = [slim(r, DN_COLS)      for r in csv.DictReader(StringIO(raw_dn))]
 
-          
+          back_rows = [slim(r, BACKEND_COLS) for r in csv.DictReader(StringIO(raw_back))]
+
+
+
+          # --- BUILD LOOKUPS ---
 
           valid_ids = {r['SSE ID'].upper() for r in oms_rows if r['SSE ID'].strip()}
 
+          # DN lookup: key=SSE_ID, value=list of DN rows
           dn_lookup = {}
 
           for row in dn_rows:
@@ -212,7 +343,20 @@ jobs:
 
                   dn_lookup.setdefault(key, []).append(row)
 
+          # Backend lookup: key=SSE_ID, value=backend row
+          backend_lookup = {}
 
+          for row in back_rows:
+
+              key = row['B_SSE_ID'].strip().upper()
+
+              if key:
+
+                  backend_lookup[key] = row
+
+
+
+          # --- MERGE OMS + DN ---
 
           merged = []
 
@@ -263,6 +407,100 @@ jobs:
                       except: pass
 
                       merged.append(row)
+
+
+
+          # --- COMPUTE & APPEND METERING ROWS ---
+          # One synthetic row per SSE ID with item_category = 'Metering'
+          # Metering amount = Gen Meter cost + Net Meter cost + DN meter items cost
+
+          for oms in oms_rows:
+
+              sse_id    = oms['SSE ID'].strip()
+
+              key       = sse_id.upper()
+
+              b         = backend_lookup.get(key, {})
+
+              cluster   = b.get('b_cluster', '').strip()
+
+              inv_phase = b.get('inverter_phase', '').strip()
+
+              san_phase = b.get('sanction_phase', '').strip()
+
+
+
+              # Gen Meter cost (based on Inverter Phase)
+              gm_rates   = GEN_METER_RATES.get(cluster, (0, 0))
+
+              gm_cost    = gm_rates[0] if inv_phase == 'Single Phase' else gm_rates[1]
+
+
+
+              # Net Meter cost (based on Sanction Phase)
+              nm_rates   = NET_METER_RATES.get(cluster, (0, 0))
+
+              nm_cost    = nm_rates[0] if san_phase == 'Single Phase' else nm_rates[1]
+
+
+
+              # DN meter items: Communication Modem, FRP Meter Box, Meter Box
+              dn_items   = dn_lookup.get(key, [])
+
+              meter_dn_cost = sum(
+                  safe_float(r['amount'])
+                  for r in dn_items
+                  if r.get('item_name', '').strip() in METER_DN_ITEMS
+              )
+
+
+
+              metering_total = gm_cost + nm_cost + meter_dn_cost
+
+
+
+              metering_row = {h: oms.get(h, '') for h in FINAL_HEADERS}
+
+              metering_row.update({
+
+                  'item_category'   : 'Metering',
+
+                  'item_subcategory': 'Metering',
+
+                  'item_code'       : '',
+
+                  'item_name'       : 'Metering (computed)',
+
+                  'qty'             : '',
+
+                  'rate'            : '',
+
+                  'amount'          : round(metering_total, 2),
+
+                  'set_warehouse'   : '',
+
+                  'warehouse'       : '',
+
+                  'posting_date'    : '',
+
+              })
+
+              merged.append(metering_row)
+
+
+
+          # --- SORT BY ERP CATEGORY ORDER ---
+
+          def sort_key(row):
+
+              cat = (row.get('item_category') or '').strip()
+
+              return CAT_RANK.get(cat, len(CATEGORY_ORDER))
+
+
+
+          # Sort keeping OMS-only rows (no category) last
+          merged.sort(key=sort_key)
 
 
 
