@@ -4,6 +4,10 @@ generate_projects_json.py
 Run by GitHub Action after sync_data.yml to produce projects.json.gz
 Pre-aggregates 825K DN dump rows → ~32K project-level rows (~1.2 MB gz vs 14.7 MB)
 
+Metering is calculated per-project using the backend rate table formula:
+  metering = NM_rate(city, phase) + GM_rate(city, phase) + DN_dump_metering_items
+No manual monthly totals needed — fully automatic for any month.
+
 Usage:  python3 generate_projects_json.py
 Input:  data.csv.gz  (same directory)
 Output: projects.json.gz (same directory)
@@ -13,79 +17,6 @@ from collections import defaultdict
 from datetime import datetime
 
 # ── Configuration ────────────────────────────────────────────────────────────
-# Per-month TOTAL metering target (Net Meter + Gen Meter + modem/FRP/meter-box items).
-# The formula-based lookup (city+phase → fixed rate) gives the base; any residual gap
-# vs. this target (= modem, FRP meter box, meter box 400x300 items not yet in DN dump)
-# is distributed proportionally by project kW within the month.
-# Add a new key each month-close once the GL figure is confirmed.
-BACKEND_METER_BY_MONTH = {
-    '2026-1': 5926077,   # Jan 26
-    '2026-2': 5755707,   # Feb 26
-    '2026-3': 7909163,   # Mar 26
-    # Add: '2026-4': <amt>, etc. each month-close
-}
-
-# Net Meter cost lookup: city → (1-phase ₹, 3-phase ₹)
-# Source: Backend sheet columns Q:S (Net Meter table)
-NET_METER_RATE = {
-    'Pune':        (0,     0),     'Nashik':      (0,     0),
-    'Nagpur':      (0,     0),     'Aurangabad':  (0,     0),
-    'Jalgaon':     (0,     0),     'Ahmednagar':  (0,     0),
-    'Ahilyanagar': (0,     0),     'Latur':       (0,     0),
-    'Kolhapur':    (0,     0),     'Mumbai':      (0,     0),
-    'Amravati':    (0,     0),     'Solapur':     (0,     0),
-    'Bhopal':      (2841,  4617),  'Indore':      (6800,  9050),
-    'Jabalpur':    (9785,  14050), 'Gwalior':     (2841,  4617),
-    'Bengaluru':   (3250,  6376),  'Hyderabad':   (0,     0),
-    'Ahmedabad':   (0,     0),     'Surat':       (0,     0),
-    'Baroda':      (0,     0),     'Jaipur':      (3550,  6650),
-    'Ajmer':       (3550,  6650),  'Kota':        (3550,  6650),
-    'Lucknow':     (1350,  4350),  'Kanpur':      (1350,  4350),
-    'Varanasi':    (1350,  4350),  'Noida':       (1350,  4350),
-    'NCR':         (0,     0),     'Kochi':       (3250,  6376),
-    'Chennai':     (2763,  5011),  'Agra':        (1350,  4350),
-    'Coimbatore':  (2763,  5011),
-}
-
-# Generation Meter cost lookup: city → (1-phase ₹, 3-phase ₹)
-# Source: Backend sheet columns T:V (Generation Meter table)
-GEN_METER_RATE = {
-    'Pune':        (1260,  2620),  'Nashik':      (1260,  2620),
-    'Nagpur':      (1260,  2620),  'Aurangabad':  (1260,  2620),
-    'Jalgaon':     (1260,  2620),  'Ahmednagar':  (1260,  2620),
-    'Ahilyanagar': (1260,  2620),  'Latur':       (1260,  2620),
-    'Kolhapur':    (1260,  2620),  'Mumbai':      (1260,  2620),
-    'Amravati':    (1260,  2620),  'Solapur':     (1260,  2620),
-    'Bhopal':      (0,     0),     'Indore':      (0,     0),
-    'Jabalpur':    (0,     0),     'Gwalior':     (0,     0),
-    'Bengaluru':   (0,     0),     'Hyderabad':   (0,     0),
-    'Ahmedabad':   (0,     0),     'Surat':       (0,     0),
-    'Baroda':      (0,     0),     'Jaipur':      (3050,  5650),
-    'Ajmer':       (3050,  5650),  'Kota':        (3050,  5650),
-    'Lucknow':     (0,     0),     'Kanpur':      (0,     0),
-    'Varanasi':    (0,     0),     'Noida':       (0,     0),
-    'NCR':         (0,     0),     'Kochi':       (0,     0),
-    'Chennai':     (0,     0),     'Agra':        (0,     0),
-    'Coimbatore':  (0,     0),     'Warangal':    (0,     0),
-    'Gurgaon':     (0,     0),     'Delhi NCR':   (0,     0),
-    'Ghaziabad':   (0,     0),
-}
-
-def _is_3ph(ph_str):
-    return (ph_str or '').strip().lower() in ('three phase', 'three', '3')
-
-def formula_metering(city, ph_str):
-    """
-    Replicates Excel formula:
-      = IF(ph=="Single Phase", VLOOKUP(city, NetMeterTable, 1ph_col), VLOOKUP(city, NetMeterTable, 3ph_col))
-      + IF(solar_ph=="Single Phase", VLOOKUP(city, GenMeterTable, 1ph_col), VLOOKUP(city, GenMeterTable, 3ph_col))
-    (solar phase assumed same as connection phase; SUMIFS modem/FRP items handled via residual)
-    """
-    idx = 1 if _is_3ph(ph_str) else 0
-    net = NET_METER_RATE.get(city, (0, 0))[idx]
-    gen = GEN_METER_RATE.get(city, (0, 0))[idx]
-    return net + gen
-
 CIVL_TO_ELEC   = {'CIVL-0012','CIVL-0013','CIVL-0014','CIVL-0015','CIVL-0016'}
 METERING_REMAP = {'ACDB-2449-EATON'}
 DONGLE_PFX     = {'DALO','DALA'}
@@ -95,6 +26,112 @@ COGS_CATS = {
     'Welded MMS','SS NBW','Electrical BoS','Data Logger','Metering','Welcome Kit and Board'
 }
 
+# ── Backend Metering Rate Tables ─────────────────────────────────────────────
+# Formula: metering = NM(city, phase) + GM(city, phase) + DN_dump_metering_items
+# NM = Net Meter rate, GM = Generation Meter rate
+# Tuple format: (single_phase, three_phase)
+
+NM_RATES = {
+    'Pune':        (1260, 2620),
+    'Nashik':      (1260, 2620),
+    'Nagpur':      (1260, 2620),
+    'Aurangabad':  (1260, 2620),
+    'Jalgaon':     (1260, 2620),
+    'Ahmednagar':  (1260, 2620),
+    'Latur':       (1260, 2620),
+    'Kolhapur':    (1260, 2620),
+    'Mumbai':      (1260, 2620),
+    'Amravati':    (1260, 2620),
+    'Solapur':     (1260, 2620),
+    'Bhopal':      (2841, 4617),
+    'Indore':      (6800, 9050),
+    'Jabalpur':    (9785, 14050),
+    'Gwalior':     (2841, 4617),
+    'Bengaluru':   (3250, 6376),
+    'Hyderabad':   (0, 0),
+    'Ahmedabad':   (0, 0),
+    'Surat':       (0, 0),
+    'Baroda':      (0, 0),
+    'Jaipur':      (3550, 6650),
+    'Ajmer':       (3550, 6650),
+    'Kota':        (3550, 6650),
+    'Lucknow':     (1350, 4350),
+    'Kanpur':      (1350, 4350),
+    'Varanasi':    (1350, 4350),
+    'Noida':       (1350, 4350),
+    'NCR':         (0, 0),
+    'Kochi':       (3250, 6376),
+    'Chennai':     (2763, 5011),
+    'Agra':        (1350, 4350),
+    'Coimbatore':  (2763, 5011),
+    'Raipur':      (0, 0),
+    'Mysuru':      (3250, 6376),
+    'Warangal':    (0, 0),
+    'Gurgaon':     (0, 0),
+    'Delhi NCR':   (0, 0),
+    'Ghaziabad':   (1350, 4350),
+}
+
+GM_RATES = {
+    'Pune':        (0, 0),
+    'Nashik':      (0, 0),
+    'Nagpur':      (0, 0),
+    'Aurangabad':  (0, 0),
+    'Jalgaon':     (0, 0),
+    'Ahmednagar':  (0, 0),
+    'Latur':       (0, 0),
+    'Kolhapur':    (0, 0),
+    'Mumbai':      (0, 0),
+    'Amravati':    (0, 0),
+    'Solapur':     (0, 0),
+    'Bhopal':      (0, 0),
+    'Indore':      (0, 0),
+    'Jabalpur':    (0, 0),
+    'Gwalior':     (0, 0),
+    'Bengaluru':   (0, 0),
+    'Hyderabad':   (0, 0),
+    'Ahmedabad':   (0, 0),
+    'Surat':       (0, 0),
+    'Baroda':      (0, 0),
+    'Jaipur':      (3050, 5650),
+    'Ajmer':       (3050, 5650),
+    'Kota':        (3050, 5650),
+    'Lucknow':     (0, 0),
+    'Kanpur':      (0, 0),
+    'Varanasi':    (0, 0),
+    'Noida':       (0, 0),
+    'NCR':         (0, 0),
+    'Kochi':       (0, 0),
+    'Chennai':     (0, 0),
+    'Agra':        (0, 0),
+    'Coimbatore':  (0, 0),
+    'Raipur':      (0, 0),
+    'Mysuru':      (0, 0),
+    'Warangal':    (0, 0),
+    'Gurgaon':     (0, 0),
+    'Delhi NCR':   (0, 0),
+    'Ghaziabad':   (0, 0),
+}
+
+def calc_metering_backend(city, phase):
+    """Calculate backend metering = NM_rate(city, phase) + GM_rate(city, phase)"""
+    is_1ph = 'single' in phase.lower() if phase else True
+    idx = 0 if is_1ph else 1
+    nm = NM_RATES.get(city, (0, 0))
+    gm = GM_RATES.get(city, (0, 0))
+    return nm[idx] + gm[idx]
+
+def is_metering_dn_item(item_name):
+    """Check if a DN dump item matches the metering SUMIFS patterns"""
+    if 'Communication Modem' in item_name and 'Optical Cable' in item_name:
+        return True
+    if 'FRP Meter Box' in item_name:
+        return True
+    if 'Meter Box' in item_name and '400x300x150' in item_name and 'SPARK' in item_name:
+        return True
+    return False
+
+# ── Cell Name → City/State Lookup ────────────────────────────────────────────
 CELL_CITY_STATE = {
     'Aurangabad Expansion':{'c':'Aurangabad','s':'MH East'},
     'Bangalore Royal Challengers':{'c':'Bengaluru','s':'Karnataka'},
@@ -126,6 +163,8 @@ CELL_CITY_STATE = {
     'Gwalior Groundbreakers 2':{'c':'Gwalior','s':'Madhya Pradesh'},
     'Gwalior Groundbreakers 3':{'c':'Gwalior','s':'Madhya Pradesh'},
     'Gwalior Groundbreakers 4':{'c':'Gwalior','s':'Madhya Pradesh'},
+    'Gwalior Groundbreakers 5':{'c':'Gwalior','s':'Madhya Pradesh'},
+    'Speed Order Gwalior 5':{'c':'Gwalior','s':'Madhya Pradesh'},
     'Indore Immortals':{'c':'Indore','s':'Madhya Pradesh'},
     'Indore Immortals 2':{'c':'Indore','s':'Madhya Pradesh'},
     'Indore Immortals 3':{'c':'Indore','s':'Madhya Pradesh'},
@@ -139,12 +178,20 @@ CELL_CITY_STATE = {
     'Jabalpur Champions 4':{'c':'Jabalpur','s':'Madhya Pradesh'},
     'Jabalpur Champions 5':{'c':'Jabalpur','s':'Madhya Pradesh'},
     'Jalgaon Expansion':{'c':'Jalgaon','s':'MH East'},
+    'Jalgaon Expansion 2':{'c':'Jalgaon','s':'MH East'},
     'Kolhapur Kings':{'c':'Kolhapur','s':'MH West'},
     'Lucknow Lions':{'c':'Lucknow','s':'Uttar Pradesh'},
     'Lucknow Lions 2':{'c':'Lucknow','s':'Uttar Pradesh'},
     'Lucknow Lions 3':{'c':'Lucknow','s':'Uttar Pradesh'},
     'Lucknow Lions 4':{'c':'Lucknow','s':'Uttar Pradesh'},
-    'Noida Knight Riders':{'c':'Lucknow','s':'Uttar Pradesh'},
+    'Speed Order Lucknow 4':{'c':'Lucknow','s':'Uttar Pradesh'},
+    'Speed Order Lucknow 5':{'c':'Lucknow','s':'Uttar Pradesh'},
+    'Noida Knight Riders':{'c':'Noida','s':'Uttar Pradesh'},
+    'Kanpur Tigers':{'c':'Kanpur','s':'Uttar Pradesh'},
+    'Kanpur Tigers 2':{'c':'Kanpur','s':'Uttar Pradesh'},
+    'Kanpur Tigers 3':{'c':'Kanpur','s':'Uttar Pradesh'},
+    'Varanasi Warriors':{'c':'Varanasi','s':'Uttar Pradesh'},
+    'Agra Knight Riders':{'c':'Agra','s':'Uttar Pradesh'},
     'Nagpur Daredevils':{'c':'Nagpur','s':'MH East'},
     'Nagpur Daredevils 2':{'c':'Nagpur','s':'MH East'},
     'Nagpur Daredevils 3':{'c':'Nagpur','s':'MH East'},
@@ -156,7 +203,11 @@ CELL_CITY_STATE = {
     'Nagpur Daredevils 9':{'c':'Nagpur','s':'MH East'},
     'Nagpur Daredevils 10':{'c':'Nagpur','s':'MH East'},
     'Nagpur Daredevils 13':{'c':'Nagpur','s':'MH East'},
+    'Nagpur Daredevils 14':{'c':'Nagpur','s':'MH East'},
+    'Nagpur Daredevils 15':{'c':'Nagpur','s':'MH East'},
     'Nagpur Daredevils Temp':{'c':'Nagpur','s':'MH East'},
+    'Amravati Riders':{'c':'Amravati','s':'MH East'},
+    'Amravati Riders 3':{'c':'Amravati','s':'MH East'},
     'Nashik Finishers':{'c':'Nashik','s':'MH West'},
     'Nashik Finishers 2':{'c':'Nashik','s':'MH West'},
     'Nashik Finishers 3':{'c':'Nashik','s':'MH West'},
@@ -183,10 +234,12 @@ CELL_CITY_STATE = {
     'Ahilyanagar Regiments':{'c':'Pune','s':'MH West'},
     'Speed Order Ahilyanagar 1':{'c':'Pune','s':'MH West'},
     'Speed Order Pune 11':{'c':'Pune','s':'MH West'},
+    'Solapur Super Kings':{'c':'Solapur','s':'MH West'},
     'Surat Expansion':{'c':'Surat','s':'Gujrat'},
     'Surat Expansion 2':{'c':'Surat','s':'Gujrat'},
     'Jaipur Titans':{'c':'Jaipur','s':'Rajasthan'},
-    'Kota Knights':{'c':'Jaipur','s':'Rajasthan'},
+    'Speed Order Jaipur 2':{'c':'Jaipur','s':'Rajasthan'},
+    'Kota Knights':{'c':'Kota','s':'Rajasthan'},
     'Ajmer Aces':{'c':'Ajmer','s':'Rajasthan'},
     'Ajmer Aces 2':{'c':'Ajmer','s':'Rajasthan'},
     'Telangana Tuskers':{'c':'Hyderabad','s':'Telangana'},
@@ -201,6 +254,9 @@ CELL_CITY_STATE = {
     'Chennai Super Kings':{'c':'Chennai','s':'Tamil Nadu'},
     'Chennai Super Kings 2':{'c':'Chennai','s':'Tamil Nadu'},
     'Speed Order Chennai 3':{'c':'Chennai','s':'Tamil Nadu'},
+    'Coimbatore Kovai Kings':{'c':'Coimbatore','s':'Tamil Nadu'},
+    'Mysuru Mavericks':{'c':'Mysuru','s':'Karnataka'},
+    'Speed Order Gurgaon':{'c':'Gurgaon','s':'Delhi'},
 }
 
 MON_MAP = {'jan':0,'feb':1,'mar':2,'apr':3,'may':4,'jun':5,'jul':6,'aug':7,'sep':8,'oct':9,'nov':10,'dec':11}
@@ -238,6 +294,8 @@ CAT_KEY = {
 # ── Build project map ─────────────────────────────────────────────────────────
 print("Reading data.csv.gz...")
 project_map = {}
+dn_metering = defaultdict(float)   # DN dump metering items per project
+unmapped_cells = defaultdict(int)   # Track unmapped cells for warning
 
 with gzip.open('data.csv.gz', 'rt', encoding='utf-8', errors='replace') as f:
     reader = csv.DictReader(f)
@@ -260,11 +318,17 @@ with gzip.open('data.csv.gz', 'rt', encoding='utf-8', errors='replace') as f:
         item_name = row['item_name'].strip()
         cat = resolve_cat(item_code, raw_cat)
 
+        # Track DN dump metering items (from the Excel SUMIFS part of the formula)
+        if is_metering_dn_item(item_name):
+            dn_metering[sse] += amt
+
         if sse not in project_map:
             cell = row['Cell Name'].strip()
             cs   = CELL_CITY_STATE.get(cell)
             city = cs['c'] if cs else row['City'].strip()
             state= cs['s'] if cs else row['State'].strip()
+            if cell and not cs and not city:
+                unmapped_cells[cell] += 1
             d    = parse_date(row['Installation Completion Date'])
             offer= row['Offer Type'].strip().replace('GoodZero+','GoodZero')
             phase= row['Phase Connection'].strip()
@@ -289,37 +353,43 @@ with gzip.open('data.csv.gz', 'rt', encoding='utf-8', errors='replace') as f:
 
 print(f"Built {len(project_map):,} projects")
 
-# ── Metering: formula-based lookup + residual distribution ───────────────────
-# Step 1: Apply per-project formula (Net Meter rate + Generation Meter rate by city+phase)
-month_groups = defaultdict(list)
-for p in project_map.values():
-    if p['dt']:
-        mkey = p['dt'][:7]  # YYYY-MM
-        month_groups[mkey].append(p)
-    # Base metering from lookup table (covers net meter + gen meter hardware costs)
-    p['mtr'] = round(p['mtr'] + formula_metering(p['c'], p['ph']), 2)
+if unmapped_cells:
+    print(f"\n⚠  WARNING: {len(unmapped_cells)} unmapped cell names (add to CELL_CITY_STATE):")
+    for cell, cnt in sorted(unmapped_cells.items(), key=lambda x: -x[1]):
+        print(f"    {cell}: {cnt} projects")
 
-# Step 2: For months with a confirmed GL target, distribute the residual (modem +
-#         FRP meter box + meter box 400×300 items) proportionally by project kW.
-for mkey, projs in month_groups.items():
-    yr, mo = mkey.split('-')
-    target = BACKEND_METER_BY_MONTH.get(f"{yr}-{int(mo)}", 0)
-    if not target: continue
-    formula_total = sum(p['mtr'] for p in projs)
-    residual = target - formula_total
-    if residual <= 0:
-        print(f"  Metering {mkey}: formula ₹{formula_total:,.0f} already meets/exceeds target ₹{target:,}")
-        continue
-    total_kw = sum(p['kw'] for p in projs)
-    if not total_kw: continue
-    distributed = 0
-    for i, p in enumerate(projs):
-        share = (residual - distributed) if i == len(projs)-1 else round(residual * p['kw'] / total_kw)
-        if share > 0:
-            p['mtr'] = round(p['mtr'] + share, 2)
-            distributed += share
-    final_total = sum(p['mtr'] for p in projs)
-    print(f"  Metering {mkey}: formula={formula_total:,.0f} + residual={distributed:,} = {final_total:,.0f} (target {target:,})")
+# ── Backend metering injection (formula-based) ───────────────────────────────
+# metering = NM_rate(city, phase) + GM_rate(city, phase) + DN_dump_items
+# This replaces the old BACKEND_METER_BY_MONTH manual dict
+
+month_metering = defaultdict(float)
+no_rate_cities = defaultdict(int)
+
+for sse, p in project_map.items():
+    backend = calc_metering_backend(p['c'], p['ph'])
+    dn = dn_metering.get(sse, 0)
+    total_mtr = backend + dn
+
+    if total_mtr > 0:
+        p['mtr'] = round(p['mtr'] + total_mtr, 2)
+
+    if p['dt']:
+        mkey = p['dt'][:7]
+        month_metering[mkey] += total_mtr
+
+    if p['c'] and p['c'] not in NM_RATES and backend == 0:
+        no_rate_cities[p['c']] += 1
+
+print()
+for mkey in sorted(month_metering):
+    if month_metering[mkey] > 0:
+        count = sum(1 for p in project_map.values() if p['dt'].startswith(mkey))
+        print(f"  Metering {mkey}: ₹{month_metering[mkey]:,.0f} → {count} projects")
+
+if no_rate_cities:
+    print(f"\n⚠  Cities not in rate table (0 metering):")
+    for c, cnt in sorted(no_rate_cities.items(), key=lambda x: -x[1]):
+        print(f"    {c}: {cnt} projects")
 
 # ── Compute final COGS ────────────────────────────────────────────────────────
 projects = []
@@ -339,18 +409,25 @@ gz_mb  = os.path.getsize('projects.json.gz')/1e6
 print(f"\nOutput: {len(projects):,} projects | JSON {raw_mb:.1f} MB → gz {gz_mb:.2f} MB")
 
 # ── Quick verification ─────────────────────────────────────────────────────────
-for mo, label, actual_cogs, actual_rev in [
-    (1, 'Jan 26', 332173601, 576507216),
-    (2, 'Feb 26', 305964188, 532008767),
-    (3, 'Mar 26', None, None),
+print("\n── Verification ──")
+for mo, label, actual_cogs, actual_rev, actual_mtr in [
+    (1, 'Jan 26', 332173601, 576507216, 5926077),
+    (2, 'Feb 26', 305964188, 532008767, 5755707),
+    (3, 'Mar 26', None, None, 7909163),
 ]:
     ps = [p for p in projects if p['dt'].startswith(f'2026-0{mo}')]
     rev  = sum(p['rev']  for p in ps)
     cogs = sum(p['cogs'] for p in ps)
     mtr  = sum(p['mtr']  for p in ps)
     gm   = (rev-cogs)/rev*100 if rev else 0
+    mtr_delta = mtr - actual_mtr if actual_mtr else 0
+    mtr_pct   = mtr_delta / actual_mtr * 100 if actual_mtr else 0
+    line = f"  {label}: {len(ps)} projects | Metering={mtr:,.0f}"
+    if actual_mtr:
+        line += f" (actual {actual_mtr:,.0f}, delta {mtr_delta:+,.0f} = {mtr_pct:+.2f}%)"
     if actual_cogs and actual_rev:
-        ag   = (actual_rev-actual_cogs)/actual_rev*100
-        print(f"  {label}: {len(ps)} projects | MTR={mtr:,.0f} | COGS={cogs/1e7:.2f}Cr (actual {actual_cogs/1e7:.2f}Cr) | GM%={gm:.2f}% (actual {ag:.2f}%)")
+        ag = (actual_rev-actual_cogs)/actual_rev*100
+        line += f" | COGS={cogs/1e7:.2f}Cr (actual {actual_cogs/1e7:.2f}Cr) | GM%={gm:.2f}% (actual {ag:.2f}%)"
     else:
-        print(f"  {label}: {len(ps)} projects | MTR={mtr:,.0f} | COGS={cogs/1e7:.2f}Cr | GM%={gm:.2f}%")
+        line += f" | COGS={cogs/1e7:.2f}Cr | GM%={gm:.2f}%"
+    print(line)
