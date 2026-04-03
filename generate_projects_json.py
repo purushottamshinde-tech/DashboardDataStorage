@@ -13,12 +13,78 @@ from collections import defaultdict
 from datetime import datetime
 
 # ── Configuration ────────────────────────────────────────────────────────────
+# Per-month TOTAL metering target (Net Meter + Gen Meter + modem/FRP/meter-box items).
+# The formula-based lookup (city+phase → fixed rate) gives the base; any residual gap
+# vs. this target (= modem, FRP meter box, meter box 400x300 items not yet in DN dump)
+# is distributed proportionally by project kW within the month.
+# Add a new key each month-close once the GL figure is confirmed.
 BACKEND_METER_BY_MONTH = {
     '2026-1': 5926077,   # Jan 26
     '2026-2': 5755707,   # Feb 26
     '2026-3': 7909163,   # Mar 26
     # Add: '2026-4': <amt>, etc. each month-close
 }
+
+# Net Meter cost lookup: city → (1-phase ₹, 3-phase ₹)
+# Source: Backend sheet columns Q:S (Net Meter table)
+NET_METER_RATE = {
+    'Pune':        (0,     0),     'Nashik':      (0,     0),
+    'Nagpur':      (0,     0),     'Aurangabad':  (0,     0),
+    'Jalgaon':     (0,     0),     'Ahmednagar':  (0,     0),
+    'Ahilyanagar': (0,     0),     'Latur':       (0,     0),
+    'Kolhapur':    (0,     0),     'Mumbai':      (0,     0),
+    'Amravati':    (0,     0),     'Solapur':     (0,     0),
+    'Bhopal':      (2841,  4617),  'Indore':      (6800,  9050),
+    'Jabalpur':    (9785,  14050), 'Gwalior':     (2841,  4617),
+    'Bengaluru':   (3250,  6376),  'Hyderabad':   (0,     0),
+    'Ahmedabad':   (0,     0),     'Surat':       (0,     0),
+    'Baroda':      (0,     0),     'Jaipur':      (3550,  6650),
+    'Ajmer':       (3550,  6650),  'Kota':        (3550,  6650),
+    'Lucknow':     (1350,  4350),  'Kanpur':      (1350,  4350),
+    'Varanasi':    (1350,  4350),  'Noida':       (1350,  4350),
+    'NCR':         (0,     0),     'Kochi':       (3250,  6376),
+    'Chennai':     (2763,  5011),  'Agra':        (1350,  4350),
+    'Coimbatore':  (2763,  5011),
+}
+
+# Generation Meter cost lookup: city → (1-phase ₹, 3-phase ₹)
+# Source: Backend sheet columns T:V (Generation Meter table)
+GEN_METER_RATE = {
+    'Pune':        (1260,  2620),  'Nashik':      (1260,  2620),
+    'Nagpur':      (1260,  2620),  'Aurangabad':  (1260,  2620),
+    'Jalgaon':     (1260,  2620),  'Ahmednagar':  (1260,  2620),
+    'Ahilyanagar': (1260,  2620),  'Latur':       (1260,  2620),
+    'Kolhapur':    (1260,  2620),  'Mumbai':      (1260,  2620),
+    'Amravati':    (1260,  2620),  'Solapur':     (1260,  2620),
+    'Bhopal':      (0,     0),     'Indore':      (0,     0),
+    'Jabalpur':    (0,     0),     'Gwalior':     (0,     0),
+    'Bengaluru':   (0,     0),     'Hyderabad':   (0,     0),
+    'Ahmedabad':   (0,     0),     'Surat':       (0,     0),
+    'Baroda':      (0,     0),     'Jaipur':      (3050,  5650),
+    'Ajmer':       (3050,  5650),  'Kota':        (3050,  5650),
+    'Lucknow':     (0,     0),     'Kanpur':      (0,     0),
+    'Varanasi':    (0,     0),     'Noida':       (0,     0),
+    'NCR':         (0,     0),     'Kochi':       (0,     0),
+    'Chennai':     (0,     0),     'Agra':        (0,     0),
+    'Coimbatore':  (0,     0),     'Warangal':    (0,     0),
+    'Gurgaon':     (0,     0),     'Delhi NCR':   (0,     0),
+    'Ghaziabad':   (0,     0),
+}
+
+def _is_3ph(ph_str):
+    return (ph_str or '').strip().lower() in ('three phase', 'three', '3')
+
+def formula_metering(city, ph_str):
+    """
+    Replicates Excel formula:
+      = IF(ph=="Single Phase", VLOOKUP(city, NetMeterTable, 1ph_col), VLOOKUP(city, NetMeterTable, 3ph_col))
+      + IF(solar_ph=="Single Phase", VLOOKUP(city, GenMeterTable, 1ph_col), VLOOKUP(city, GenMeterTable, 3ph_col))
+    (solar phase assumed same as connection phase; SUMIFS modem/FRP items handled via residual)
+    """
+    idx = 1 if _is_3ph(ph_str) else 0
+    net = NET_METER_RATE.get(city, (0, 0))[idx]
+    gen = GEN_METER_RATE.get(city, (0, 0))[idx]
+    return net + gen
 
 CIVL_TO_ELEC   = {'CIVL-0012','CIVL-0013','CIVL-0014','CIVL-0015','CIVL-0016'}
 METERING_REMAP = {'ACDB-2449-EATON'}
@@ -223,26 +289,37 @@ with gzip.open('data.csv.gz', 'rt', encoding='utf-8', errors='replace') as f:
 
 print(f"Built {len(project_map):,} projects")
 
-# ── Backend metering injection ────────────────────────────────────────────────
+# ── Metering: formula-based lookup + residual distribution ───────────────────
+# Step 1: Apply per-project formula (Net Meter rate + Generation Meter rate by city+phase)
 month_groups = defaultdict(list)
 for p in project_map.values():
     if p['dt']:
         mkey = p['dt'][:7]  # YYYY-MM
         month_groups[mkey].append(p)
+    # Base metering from lookup table (covers net meter + gen meter hardware costs)
+    p['mtr'] = round(p['mtr'] + formula_metering(p['c'], p['ph']), 2)
 
+# Step 2: For months with a confirmed GL target, distribute the residual (modem +
+#         FRP meter box + meter box 400×300 items) proportionally by project kW.
 for mkey, projs in month_groups.items():
     yr, mo = mkey.split('-')
     target = BACKEND_METER_BY_MONTH.get(f"{yr}-{int(mo)}", 0)
     if not target: continue
+    formula_total = sum(p['mtr'] for p in projs)
+    residual = target - formula_total
+    if residual <= 0:
+        print(f"  Metering {mkey}: formula ₹{formula_total:,.0f} already meets/exceeds target ₹{target:,}")
+        continue
     total_kw = sum(p['kw'] for p in projs)
     if not total_kw: continue
     distributed = 0
     for i, p in enumerate(projs):
-        bm = (target - distributed) if i == len(projs)-1 else round(target * p['kw'] / total_kw)
-        if bm > 0:
-            p['mtr'] = round(p['mtr'] + bm, 2)
-            distributed += bm
-    print(f"  Metering {mkey}: ₹{distributed:,} → {len(projs)} projects")
+        share = (residual - distributed) if i == len(projs)-1 else round(residual * p['kw'] / total_kw)
+        if share > 0:
+            p['mtr'] = round(p['mtr'] + share, 2)
+            distributed += share
+    final_total = sum(p['mtr'] for p in projs)
+    print(f"  Metering {mkey}: formula={formula_total:,.0f} + residual={distributed:,} = {final_total:,.0f} (target {target:,})")
 
 # ── Compute final COGS ────────────────────────────────────────────────────────
 projects = []
@@ -265,10 +342,15 @@ print(f"\nOutput: {len(projects):,} projects | JSON {raw_mb:.1f} MB → gz {gz_m
 for mo, label, actual_cogs, actual_rev in [
     (1, 'Jan 26', 332173601, 576507216),
     (2, 'Feb 26', 305964188, 532008767),
+    (3, 'Mar 26', None, None),
 ]:
     ps = [p for p in projects if p['dt'].startswith(f'2026-0{mo}')]
     rev  = sum(p['rev']  for p in ps)
     cogs = sum(p['cogs'] for p in ps)
+    mtr  = sum(p['mtr']  for p in ps)
     gm   = (rev-cogs)/rev*100 if rev else 0
-    ag   = (actual_rev-actual_cogs)/actual_rev*100
-    print(f"  {label}: {len(ps)} projects | COGS={cogs/1e7:.2f}Cr (actual {actual_cogs/1e7:.2f}Cr) | GM%={gm:.2f}% (actual {ag:.2f}%)")
+    if actual_cogs and actual_rev:
+        ag   = (actual_rev-actual_cogs)/actual_rev*100
+        print(f"  {label}: {len(ps)} projects | MTR={mtr:,.0f} | COGS={cogs/1e7:.2f}Cr (actual {actual_cogs/1e7:.2f}Cr) | GM%={gm:.2f}% (actual {ag:.2f}%)")
+    else:
+        print(f"  {label}: {len(ps)} projects | MTR={mtr:,.0f} | COGS={cogs/1e7:.2f}Cr | GM%={gm:.2f}%")
