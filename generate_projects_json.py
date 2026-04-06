@@ -27,52 +27,14 @@ COGS_CATS = {
 }
 
 # ── Backend Metering Rate Tables ─────────────────────────────────────────────
-# Formula: metering = NM(city, phase) + GM(city, phase) + DN_dump_metering_items
-# NM = Net Meter rate, GM = Generation Meter rate
+# Formula: metering = NM(city, inv_phase) + GM(city, sanction_phase) + DN_dump_extras
+# NM = Net Meter rate (keyed on Inverter Phase — detected from DN inverter item name)
+# GM = Generation Meter rate (keyed on Sanction Phase = Phase Connection from data.csv)
 # Tuple format: (single_phase, three_phase)
+# Source: Backend rate matrix (GMB_GMP_GMI ERP Categorization)
 
 NM_RATES = {
-    'Pune':        (1260, 2620),
-    'Nashik':      (1260, 2620),
-    'Nagpur':      (1260, 2620),
-    'Aurangabad':  (1260, 2620),
-    'Jalgaon':     (1260, 2620),
-    'Ahmednagar':  (1260, 2620),
-    'Latur':       (1260, 2620),
-    'Kolhapur':    (1260, 2620),
-    'Mumbai':      (1260, 2620),
-    'Amravati':    (1260, 2620),
-    'Solapur':     (1260, 2620),
-    'Bhopal':      (2841, 4617),
-    'Indore':      (6800, 9050),
-    'Jabalpur':    (9785, 14050),
-    'Gwalior':     (2841, 4617),
-    'Bengaluru':   (3250, 6376),
-    'Hyderabad':   (0, 0),
-    'Ahmedabad':   (0, 0),
-    'Surat':       (0, 0),
-    'Baroda':      (0, 0),
-    'Jaipur':      (3550, 6650),
-    'Ajmer':       (3550, 6650),
-    'Kota':        (3550, 6650),
-    'Lucknow':     (1350, 4350),
-    'Kanpur':      (1350, 4350),
-    'Varanasi':    (1350, 4350),
-    'Noida':       (1350, 4350),
-    'NCR':         (0, 0),
-    'Kochi':       (3250, 6376),
-    'Chennai':     (2763, 5011),
-    'Agra':        (1350, 4350),
-    'Coimbatore':  (2763, 5011),
-    'Raipur':      (0, 0),
-    'Mysuru':      (3250, 6376),
-    'Warangal':    (0, 0),
-    'Gurgaon':     (0, 0),
-    'Delhi NCR':   (0, 0),
-    'Ghaziabad':   (1350, 4350),
-}
-
-GM_RATES = {
+    # MH clusters — Net Meter included in discom, rate = 0
     'Pune':        (0, 0),
     'Nashik':      (0, 0),
     'Nagpur':      (0, 0),
@@ -84,27 +46,83 @@ GM_RATES = {
     'Mumbai':      (0, 0),
     'Amravati':    (0, 0),
     'Solapur':     (0, 0),
+    # MP clusters
+    'Bhopal':      (2841, 4617),
+    'Indore':      (6800, 9050),
+    'Jabalpur':    (9785, 14050),
+    'Gwalior':     (2841, 4617),
+    # South
+    'Bengaluru':   (3250, 6376),
+    'Hyderabad':   (0, 0),
+    # Gujarat
+    'Ahmedabad':   (0, 0),
+    'Surat':       (0, 0),
+    'Baroda':      (0, 0),
+    # Rajasthan
+    'Jaipur':      (3550, 6650),
+    'Ajmer':       (3550, 6650),
+    'Kota':        (3550, 6650),
+    # UP / North
+    'Lucknow':     (1350, 4350),
+    'Kanpur':      (1350, 4350),
+    'Varanasi':    (1350, 4350),
+    'Noida':       (1350, 4350),
+    'NCR':         (0, 0),
+    # South (others)
+    'Kochi':       (3250, 6376),
+    'Chennai':     (2763, 5011),
+    'Agra':        (1350, 4350),
+    'Coimbatore':  (2763, 5011),
+    # Additional mapped cities
+    'Raipur':      (0, 0),
+    'Mysuru':      (3250, 6376),
+    'Warangal':    (0, 0),
+    'Gurgaon':     (0, 0),
+    'Delhi NCR':   (0, 0),
+    'Ghaziabad':   (1350, 4350),
+}
+
+GM_RATES = {
+    # MH clusters — Generation Meter procured by SSE
+    'Pune':        (1260, 2620),
+    'Nashik':      (1260, 2620),
+    'Nagpur':      (1260, 2620),
+    'Aurangabad':  (1260, 2620),
+    'Jalgaon':     (1260, 2620),
+    'Ahmednagar':  (1260, 2620),
+    'Latur':       (1260, 2620),
+    'Kolhapur':    (1260, 2620),
+    'Mumbai':      (1260, 2620),
+    'Amravati':    (1260, 2620),
+    'Solapur':     (1260, 2620),
+    # MP clusters — no Gen Meter
     'Bhopal':      (0, 0),
     'Indore':      (0, 0),
     'Jabalpur':    (0, 0),
     'Gwalior':     (0, 0),
+    # South
     'Bengaluru':   (0, 0),
     'Hyderabad':   (0, 0),
+    # Gujarat
     'Ahmedabad':   (0, 0),
     'Surat':       (0, 0),
     'Baroda':      (0, 0),
+    # Rajasthan — Gen Meter applies
     'Jaipur':      (3050, 5650),
     'Ajmer':       (3050, 5650),
     'Kota':        (3050, 5650),
+    # UP / North — no Gen Meter
     'Lucknow':     (0, 0),
     'Kanpur':      (0, 0),
     'Varanasi':    (0, 0),
     'Noida':       (0, 0),
     'NCR':         (0, 0),
+    # South (others)
     'Kochi':       (0, 0),
     'Chennai':     (0, 0),
     'Agra':        (0, 0),
     'Coimbatore':  (0, 0),
+    # Additional mapped cities
     'Raipur':      (0, 0),
     'Mysuru':      (0, 0),
     'Warangal':    (0, 0),
@@ -113,13 +131,35 @@ GM_RATES = {
     'Ghaziabad':   (0, 0),
 }
 
-def calc_metering_backend(city, phase):
-    """Calculate backend metering = NM_rate(city, phase) + GM_rate(city, phase)"""
-    is_1ph = 'single' in phase.lower() if phase else True
-    idx = 0 if is_1ph else 1
+def detect_inverter_phase(inv_item_name):
+    """Detect inverter phase from DN item_name.
+    NM rate uses Inverter Phase (not Sanction Phase).
+    Returns 'Single Phase' or 'Three Phase'."""
+    n = str(inv_item_name)
+    # Skip batteries — they aren't the main inverter
+    if 'Battery' in n and 'Hybrid' in n:
+        return None  # signal to skip this item
+    if '3 Phase' in n or '3-Phase' in n or 'Three Phase' in n:
+        return 'Three Phase'
+    if '1 Phase' in n or '1-Phase' in n or 'Single Phase' in n:
+        return 'Single Phase'
+    # Enphase microinverters are always single phase
+    if 'ENPHASE' in n.upper() or 'Micro' in n.lower():
+        return 'Single Phase'
+    # Default: single phase
+    return 'Single Phase'
+
+def calc_metering_backend(city, inv_phase, sanction_phase):
+    """Calculate backend metering = NM_rate(city, inv_phase) + GM_rate(city, sanction_phase).
+    NM uses Inverter Phase (detected from DN item name).
+    GM uses Sanction Phase (= Phase Connection from data.csv)."""
+    # NM lookup — keyed on inverter phase
+    nm_idx = 0 if (not inv_phase or 'single' in inv_phase.lower()) else 1
     nm = NM_RATES.get(city, (0, 0))
+    # GM lookup — keyed on sanction/connection phase
+    gm_idx = 0 if (not sanction_phase or 'single' in sanction_phase.lower()) else 1
     gm = GM_RATES.get(city, (0, 0))
-    return nm[idx] + gm[idx]
+    return nm[nm_idx] + gm[gm_idx]
 
 def is_metering_dn_item(item_name):
     """Check if a DN dump item matches the metering SUMIFS patterns"""
@@ -348,8 +388,15 @@ with gzip.open('data.csv.gz', 'rt', encoding='utf-8', errors='replace') as f:
         if cat == 'Module' and item_name:
             if not p['mt']: p['mt'] = item_name; p['mq'] = qty
             elif p['mt'] == item_name: p['mq'] += qty
-        if cat == 'Inverter' and item_name and not p['it']:
-            p['it'] = item_name; p['iq'] = qty
+        if cat == 'Inverter' and item_name:
+            if not p['it']:
+                p['it'] = item_name; p['iq'] = qty
+            # Detect inverter phase from DN item name (for NM rate lookup)
+            # Skip batteries — they aren't the main inverter
+            if '_inv_phase' not in p or not p['_inv_phase']:
+                detected = detect_inverter_phase(item_name)
+                if detected:  # None = battery, skip
+                    p['_inv_phase'] = detected
 
 print(f"Built {len(project_map):,} projects")
 
@@ -358,15 +405,22 @@ if unmapped_cells:
     for cell, cnt in sorted(unmapped_cells.items(), key=lambda x: -x[1]):
         print(f"    {cell}: {cnt} projects")
 
-# ── Backend metering injection (formula-based) ───────────────────────────────
-# metering = NM_rate(city, phase) + GM_rate(city, phase) + DN_dump_items
-# This replaces the old BACKEND_METER_BY_MONTH manual dict
+# ── Backend metering injection (formula-based, dual-phase) ────────────────────
+# metering = NM_rate(city, inv_phase) + GM_rate(city, sanction_phase) + DN_dump_items
+# NM uses Inverter Phase (detected from DN item name via detect_inverter_phase)
+# GM uses Sanction Phase (= Phase Connection from data.csv, stored in p['ph'])
 
 month_metering = defaultdict(float)
 no_rate_cities = defaultdict(int)
+phase_mismatch_count = 0
 
 for sse, p in project_map.items():
-    backend = calc_metering_backend(p['c'], p['ph'])
+    inv_phase = p.get('_inv_phase', p['ph'])  # fallback to Phase Connection if no inverter detected
+    sanction_phase = p['ph']                   # Phase Connection = Sanction Phase (100% match)
+    if inv_phase != sanction_phase:
+        phase_mismatch_count += 1
+
+    backend = calc_metering_backend(p['c'], inv_phase, sanction_phase)
     dn = dn_metering.get(sse, 0)
     total_mtr = backend + dn
 
@@ -381,6 +435,7 @@ for sse, p in project_map.items():
         no_rate_cities[p['c']] += 1
 
 print()
+print(f"  Phase mismatches (inv_phase ≠ sanction_phase): {phase_mismatch_count}")
 for mkey in sorted(month_metering):
     if month_metering[mkey] > 0:
         count = sum(1 for p in project_map.values() if p['dt'].startswith(mkey))
