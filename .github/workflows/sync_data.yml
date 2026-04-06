@@ -84,7 +84,7 @@ jobs:
               return r.json()['id']
 
           def fetch_csv(sid, cid):
-              r = requests.post(f"{METABASE_URL}/api/card/{cid}/query/csv", headers={"X-Metabase-Session": sid}, timeout=300)
+              r = requests.post(f"{METABASE_URL}/api/card/{cid}/query/csv", headers={"X-Metabase-Session": sid}, timeout=600)
               r.raise_for_status()
               return r.text
 
