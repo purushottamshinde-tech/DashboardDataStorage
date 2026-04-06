@@ -8,6 +8,7 @@ on:
 jobs:
   sync:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: write
 
@@ -26,9 +27,11 @@ jobs:
       - name: Fetch, Merge and Save
         run: |
           python3 << 'EOF'
-          import requests, csv, gzip, shutil, os, json
+          import requests, csv, gzip, shutil, os, json, time
           from io import StringIO
           from datetime import datetime, timezone
+          from requests.adapters import HTTPAdapter
+          from urllib3.util.retry import Retry
 
           # --- CONFIG ---
           METABASE_URL     = "https://metabase-lighthouse.solarsquare.in"
@@ -78,23 +81,44 @@ jobs:
           ]
 
           # --- HELPERS ---
-          def get_session():
-              r = requests.post(f"{METABASE_URL}/api/session", json={"username": USERNAME, "password": PASSWORD}, timeout=60)
+          def make_http():
+              s = requests.Session()
+              retries = Retry(total=3, backoff_factor=30, status_forcelist=[502,503,504], allowed_methods=["POST"])
+              s.mount("https://", HTTPAdapter(max_retries=retries))
+              return s
+
+          def get_session(http):
+              r = http.post(f"{METABASE_URL}/api/session", json={"username": USERNAME, "password": PASSWORD}, timeout=60)
               r.raise_for_status()
               return r.json()['id']
 
-          def fetch_csv(sid, cid):
-              r = requests.post(f"{METABASE_URL}/api/card/{cid}/query/csv", headers={"X-Metabase-Session": sid}, timeout=600)
-              r.raise_for_status()
-              return r.text
+          def fetch_csv(http, sid, cid, label="data"):
+              for attempt in range(3):
+                  try:
+                      print(f"  [{label}] Attempt {attempt+1}/3 ...")
+                      r = http.post(f"{METABASE_URL}/api/card/{cid}/query/csv", headers={"X-Metabase-Session": sid}, timeout=600)
+                      r.raise_for_status()
+                      print(f"  [{label}] OK — {len(r.text):,} chars")
+                      return r.text
+                  except (requests.exceptions.ReadTimeout, requests.exceptions.ConnectionError) as e:
+                      print(f"  [{label}] Timeout/error: {e}")
+                      if attempt == 2: raise
+                      wait = 60 * (attempt + 1)
+                      print(f"  [{label}] Waiting {wait}s before retry ...")
+                      time.sleep(wait)
 
           def slim(row, col_map):
               return {new: str(row.get(old, '')).strip() for old, new in col_map.items()}
 
           # --- EXECUTION ---
-          session = get_session()
-          raw_oms = fetch_csv(session, OMS_CARD_ID)
-          raw_dn  = fetch_csv(session, DN_CARD_ID)
+          http    = make_http()
+          session = get_session(http)
+
+          print("Fetching OMS data ...")
+          raw_oms = fetch_csv(http, session, OMS_CARD_ID, label="OMS")
+
+          print("Fetching DN data ...")
+          raw_dn  = fetch_csv(http, session, DN_CARD_ID,  label="DN")
 
           oms_rows = [slim(r, OMS_COLS) for r in csv.DictReader(StringIO(raw_oms))]
           dn_rows  = [slim(r, DN_COLS)  for r in csv.DictReader(StringIO(raw_dn))]
