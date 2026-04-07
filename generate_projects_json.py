@@ -8,11 +8,16 @@ Metering is calculated per-project using the backend rate table formula:
   metering = NM_rate(city, phase) + GM_rate(city, phase) + DN_dump_metering_items
 No manual monthly totals needed — fully automatic for any month.
 
+COGS uses the ERP Categorization file as the PRIMARY source for item_code → category
+mapping, falling back to the raw DN item_category only when the item_code is not in
+the ERP file.  Safety Lifeline and Civil Work are excluded from COGS.
+
 Usage:  python3 generate_projects_json.py
 Input:  data.csv.gz  (same directory)
+        erp_categorization.csv (same directory — optional, uses embedded map if missing)
 Output: projects.json.gz (same directory)
 """
-import gzip, csv, io, json, os, re
+import gzip, csv, io, json, os, re, sys
 from collections import defaultdict
 from datetime import datetime
 
@@ -20,11 +25,16 @@ from datetime import datetime
 CIVL_TO_ELEC   = {'CIVL-0012','CIVL-0013','CIVL-0014','CIVL-0015','CIVL-0016'}
 METERING_REMAP = {'ACDB-2449-EATON'}
 DONGLE_PFX     = {'DALO','DALA'}
+
+# Categories that count towards COGS
 COGS_CATS = {
     'Module','Inverter','Prefab MMS','Cables','I&C KIT','Conduit Pipe',
     'Earthing & LA','Junction Box','Tin Shed MMS','Safety','I&C Accessories',
     'Welded MMS','SS NBW','Electrical BoS','Data Logger','Metering','Welcome Kit and Board'
 }
+
+# Categories explicitly EXCLUDED from COGS (even if present in DN data)
+EXCLUDE_CATS = {'Safety Lifeline', 'Civil Work', 'Civil work'}
 
 # ── Backend Metering Rate Tables ─────────────────────────────────────────────
 # Formula: metering = NM(city, inv_phase) + GM(city, sanction_phase) + DN_dump_extras
@@ -297,6 +307,8 @@ CELL_CITY_STATE = {
     'Coimbatore Kovai Kings':{'c':'Coimbatore','s':'Tamil Nadu'},
     'Mysuru Mavericks':{'c':'Mysuru','s':'Karnataka'},
     'Speed Order Gurgaon':{'c':'Gurgaon','s':'Delhi'},
+    'Latur Expansion':{'c':'Latur','s':'MH East'},
+    'Ahmednagar Expansion':{'c':'Ahmednagar','s':'MH West'},
 }
 
 MON_MAP = {'jan':0,'feb':1,'mar':2,'apr':3,'may':4,'jun':5,'jul':6,'aug':7,'sep':8,'oct':9,'nov':10,'dec':11}
@@ -315,14 +327,83 @@ def parse_date(v):
     except: pass
     return None
 
+
+# ── ERP Categorization ───────────────────────────────────────────────────────
+# Load from erp_categorization.csv if available; this file maps item_code → category
+# and overrides the raw DN item_category field.
+# Expected CSV columns: item_code, item_category  (or Item Code, Category)
+# The file is the authoritative source — raw DN categories are often empty/wrong.
+
+ERP_CAT_MAP = {}
+
+def load_erp_categorization():
+    """Load ERP categorization CSV. Try multiple possible filenames."""
+    global ERP_CAT_MAP
+    candidates = [
+        'erp_categorization.csv',
+        'GMB_GMP_GMI_Mar_26_ERP_Categorization.csv',
+        'GMB_GMP_GMI_ERP_Categorization.csv',
+        'erp_cat.csv',
+    ]
+    for fname in candidates:
+        if os.path.isfile(fname):
+            print(f"Loading ERP categorization from {fname}...")
+            with open(fname, 'r', encoding='utf-8', errors='replace') as f:
+                reader = csv.DictReader(f)
+                headers = reader.fieldnames
+                # Detect column names (flexible matching)
+                code_col = None
+                cat_col  = None
+                for h in headers:
+                    hl = h.strip().lower()
+                    if hl in ('item_code', 'item code', 'itemcode', 'code'):
+                        code_col = h
+                    if hl in ('item_category', 'item category', 'category', 'itemcategory'):
+                        cat_col = h
+                if not code_col or not cat_col:
+                    print(f"  ⚠ Could not find item_code/category columns in {fname}")
+                    print(f"    Headers found: {headers}")
+                    continue
+                count = 0
+                for row in reader:
+                    ic = row[code_col].strip()
+                    ca = row[cat_col].strip()
+                    if ic and ca:
+                        ERP_CAT_MAP[ic] = ca
+                        count += 1
+                print(f"  Loaded {count:,} item_code → category mappings")
+                return True
+    print("  ⚠ No ERP categorization file found — using raw DN categories only")
+    print("    (Place erp_categorization.csv in the same directory for accurate COGS)")
+    return False
+
+erp_loaded = load_erp_categorization()
+
+
 def resolve_cat(item_code, raw_cat):
+    """Resolve the COGS category for a DN line item.
+    Priority: hardcoded overrides > ERP file > raw DN category."""
     pfx = item_code[:4].upper()
-    if pfx in DONGLE_PFX:                 return 'EXCLUDE'
-    if item_code in CIVL_TO_ELEC:         return 'Electrical BoS'
-    if item_code in METERING_REMAP:       return 'Metering'
-    if raw_cat == 'Fixtures and Tools':   return 'Welcome Kit and Board'
+
+    # 1. Hardcoded exclusions/remaps (highest priority)
+    if pfx in DONGLE_PFX:                     return 'EXCLUDE'
+    if item_code in CIVL_TO_ELEC:             return 'Electrical BoS'
+    if item_code in METERING_REMAP:           return 'Metering'
+
+    # 2. ERP categorization file override (primary source)
+    erp = ERP_CAT_MAP.get(item_code)
+    if erp:
+        # Apply same transforms as raw_cat
+        if erp in EXCLUDE_CATS:               return 'EXCLUDE'
+        if erp == 'Fixtures and Tools':       return 'Welcome Kit and Board'
+        return erp.strip()
+
+    # 3. Fallback to raw DN category
+    if raw_cat in EXCLUDE_CATS:               return 'EXCLUDE'
+    if raw_cat == 'Fixtures and Tools':       return 'Welcome Kit and Board'
     if not raw_cat and item_code.startswith('INVS'): return 'Inverter'
     return raw_cat.strip()
+
 
 CAT_KEY = {
     'Module':'mod','Inverter':'inv','Prefab MMS':'prf','Cables':'cab','I&C KIT':'ick',
@@ -332,10 +413,12 @@ CAT_KEY = {
 }
 
 # ── Build project map ─────────────────────────────────────────────────────────
-print("Reading data.csv.gz...")
+print("\nReading data.csv.gz...")
 project_map = {}
 dn_metering = defaultdict(float)   # DN dump metering items per project
 unmapped_cells = defaultdict(int)   # Track unmapped cells for warning
+unmapped_cats  = defaultdict(int)   # Track categories not in CAT_KEY (diagnostic)
+excluded_count = 0
 
 with gzip.open('data.csv.gz', 'rt', encoding='utf-8', errors='replace') as f:
     reader = csv.DictReader(f)
@@ -380,9 +463,15 @@ with gzip.open('data.csv.gz', 'rt', encoding='utf-8', errors='replace') as f:
                 'mt':'','mq':0,'it':'','iq':0,
             }
 
-        if cat == 'EXCLUDE': continue
+        if cat == 'EXCLUDE':
+            excluded_count += 1
+            continue
         k2 = CAT_KEY.get(cat)
-        if k2: project_map[sse][k2] = round(project_map[sse][k2] + amt, 2)
+        if k2:
+            project_map[sse][k2] = round(project_map[sse][k2] + amt, 2)
+        elif cat:
+            # Track unmapped categories for diagnostic
+            unmapped_cats[cat] += 1
 
         p = project_map[sse]
         if cat == 'Module' and item_name:
@@ -399,11 +488,17 @@ with gzip.open('data.csv.gz', 'rt', encoding='utf-8', errors='replace') as f:
                     p['_inv_phase'] = detected
 
 print(f"Built {len(project_map):,} projects")
+print(f"  Excluded rows (dongles, Safety Lifeline, Civil Work): {excluded_count:,}")
 
 if unmapped_cells:
     print(f"\n⚠  WARNING: {len(unmapped_cells)} unmapped cell names (add to CELL_CITY_STATE):")
     for cell, cnt in sorted(unmapped_cells.items(), key=lambda x: -x[1]):
         print(f"    {cell}: {cnt} projects")
+
+if unmapped_cats:
+    print(f"\n⚠  WARNING: {len(unmapped_cats)} categories not in CAT_KEY (not counted in COGS):")
+    for cat, cnt in sorted(unmapped_cats.items(), key=lambda x: -x[1])[:20]:
+        print(f"    '{cat}': {cnt:,} rows")
 
 # ── Backend metering injection (formula-based, dual-phase) ────────────────────
 # metering = NM_rate(city, inv_phase) + GM_rate(city, sanction_phase) + DN_dump_items
@@ -449,6 +544,8 @@ if no_rate_cities:
 # ── Compute final COGS ────────────────────────────────────────────────────────
 projects = []
 for p in project_map.values():
+    # Remove internal-only fields before output
+    p.pop('_inv_phase', None)
     cogs = round(p['mod']+p['inv']+p['prf']+p['cab']+p['ick']+p['con']+p['ear']+
                  p['jbx']+p['tsh']+p['saf']+p['ica']+p['wel']+p['ssn']+p['ebo']+
                  p['dlg']+p['mtr']+p['wkt'], 2)
@@ -465,24 +562,27 @@ print(f"\nOutput: {len(projects):,} projects | JSON {raw_mb:.1f} MB → gz {gz_m
 
 # ── Quick verification ─────────────────────────────────────────────────────────
 print("\n── Verification ──")
-for mo, label, actual_cogs, actual_rev, actual_mtr in [
-    (1, 'Jan 26', 332173601, 576507216, 5926077),
-    (2, 'Feb 26', 305964188, 532008767, 5755707),
-    (3, 'Mar 26', None, None, 7909163),
-]:
-    ps = [p for p in projects if p['dt'].startswith(f'2026-0{mo}')]
+
+# Per-category totals for Jan/Feb 26 (diagnostic)
+for mo, label in [(1, 'Jan 26'), (2, 'Feb 26'), (3, 'Mar 26')]:
+    ps = [p for p in projects if p['dt'].startswith(f'2026-{mo:02d}')]
+    if not ps: continue
     rev  = sum(p['rev']  for p in ps)
     cogs = sum(p['cogs'] for p in ps)
     mtr  = sum(p['mtr']  for p in ps)
     gm   = (rev-cogs)/rev*100 if rev else 0
-    mtr_delta = mtr - actual_mtr if actual_mtr else 0
-    mtr_pct   = mtr_delta / actual_mtr * 100 if actual_mtr else 0
-    line = f"  {label}: {len(ps)} projects | Metering={mtr:,.0f}"
-    if actual_mtr:
-        line += f" (actual {actual_mtr:,.0f}, delta {mtr_delta:+,.0f} = {mtr_pct:+.2f}%)"
-    if actual_cogs and actual_rev:
-        ag = (actual_rev-actual_cogs)/actual_rev*100
-        line += f" | COGS={cogs/1e7:.2f}Cr (actual {actual_cogs/1e7:.2f}Cr) | GM%={gm:.2f}% (actual {ag:.2f}%)"
-    else:
-        line += f" | COGS={cogs/1e7:.2f}Cr | GM%={gm:.2f}%"
-    print(line)
+    print(f"\n  {label}: {len(ps)} projects | Rev={rev/1e7:.2f}Cr | COGS={cogs/1e7:.2f}Cr | GM%={gm:.2f}%")
+    # Breakdown by category
+    for cat_name, key in sorted(CAT_KEY.items(), key=lambda x: -sum(p[x[1]] for p in ps)):
+        total = sum(p[key] for p in ps)
+        if total > 0:
+            print(f"    {cat_name:25s}: ₹{total/1e7:.2f}Cr")
+
+# Metering comparison with actuals
+print("\n── Metering Accuracy ──")
+for mo, label, actual_mtr in [(1, 'Jan 26', 5926077), (2, 'Feb 26', 5755707), (3, 'Mar 26', 7909163)]:
+    ps = [p for p in projects if p['dt'].startswith(f'2026-{mo:02d}')]
+    mtr = sum(p['mtr'] for p in ps)
+    delta = mtr - actual_mtr
+    pct   = delta / actual_mtr * 100 if actual_mtr else 0
+    print(f"  {label}: Metering={mtr:,.0f} (actual {actual_mtr:,.0f}, delta {delta:+,.0f} = {pct:+.2f}%)")
