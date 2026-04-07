@@ -1,5 +1,8 @@
 {
-  "last_updated": "2026-04-07T17:26:07Z",
+  "last_updated": "2026-04-07T17:52:25Z",
   "total_rows": 32615,
-  "oms_rows": 32615
+  "oms_rows": 32615,
+  "dn_rows": 35232,
+  "dn_enriched": 0,
+  "oms_no_dn": 9
 }
