@@ -39,45 +39,36 @@ jobs:
           PASSWORD         = "Devika@2025"
           OMS_CARD_ID      = 2154
           DN_CARD_ID       = 2106
-          RATE_545_NON_DCR = 8134.52
-          RATE_540_DCR      = 12065.00
 
           # --- COLUMN MAPPING ---
+          # Mapping Python internal names to your SQL Aliases
           OMS_COLS = {
               'SSE ID'                        : 'SSE ID',
-              'Installation Completion Date': 'Installation Completion Date',
-              'Cell Name'                   : 'Cell Name',
-              'City'                        : 'City',
-              'State'                       : 'State',
-              'Project Size (kW)'           : 'Project Size (kW)',
-              'Offer Type'                  : 'Offer Type',
-              'Phase Connection'            : 'Phase Connection',
-              'Final Revenue'                : 'Final Revenue',
-              'Final Revenue Excl. GST'     : 'Final Revenue Excl. GST',
+              'Installation Completion Date'  : 'Installation Completion Date',
+              'Cell Name'                     : 'Cell Name',
+              'City'                          : 'City',
+              'State'                         : 'State',
+              'Project Size (kW)'             : 'Project Size (kW)',
+              'Offer Type'                    : 'Offer Type',
+              'Phase Connection'              : 'Phase Connection',
+              'Final Revenue'                 : 'Final Revenue',
+              'Final Revenue Excl. GST'       : 'Final Revenue Excl. GST',
           }
 
+          # Updated to match your DN Dump SQL Aliases
           DN_COLS = {
-              'customer'        : 'DN_SSE_ID',
-              'posting_date'    : 'posting_date',
-              'item_code'       : 'item_code',
-              'item_name'       : 'item_name',
-              'item_category'   : 'item_category',
-              'item_subcategory': 'item_subcategory',
-              'set_warehouse'   : 'set_warehouse',
-              'warehouse'       : 'warehouse',
-              'qty'             : 'qty',
-              'uom'             : 'uom',
-              'rate'            : 'rate',
-              'amount'          : 'amount',
+              'customer'     : 'DN_SSE_ID',
+              'posting_date' : 'posting_date',
+              'Total_Amount' : 'amount',
+              'Module'       : 'module_cost',
+              'Inverter'     : 'inverter_cost'
           }
 
           FINAL_HEADERS = [
               'SSE ID', 'Installation Completion Date', 'Cell Name',
               'City', 'State', 'Project Size (kW)', 'Offer Type', 'Phase Connection',
               'Final Revenue', 'Final Revenue Excl. GST',
-              'posting_date', 'item_code', 'item_name', 'item_category',
-              'item_subcategory', 'set_warehouse', 'warehouse',
-              'qty', 'uom', 'rate', 'amount',
+              'posting_date', 'amount', 'module_cost', 'inverter_cost'
           ]
 
           # --- HELPERS ---
@@ -100,61 +91,44 @@ jobs:
                       r.raise_for_status()
                       print(f"  [{label}] OK — {len(r.text):,} chars")
                       return r.text
-                  except (requests.exceptions.ReadTimeout, requests.exceptions.ConnectionError) as e:
-                      print(f"  [{label}] Timeout/error: {e}")
+                  except Exception as e:
+                      print(f"  [{label}] Error: {e}")
                       if attempt == 2: raise
-                      wait = 60 * (attempt + 1)
-                      print(f"  [{label}] Waiting {wait}s before retry ...")
-                      time.sleep(wait)
-
-          def slim(row, col_map):
-              return {new: str(row.get(old, '')).strip() for old, new in col_map.items()}
+                      time.sleep(30)
 
           # --- EXECUTION ---
           http    = make_http()
           session = get_session(http)
 
-          print("Fetching OMS data ...")
+          print("Fetching OMS data...")
           raw_oms = fetch_csv(http, session, OMS_CARD_ID, label="OMS")
-
-          print("Fetching DN data ...")
+          print("Fetching DN data...")
           raw_dn  = fetch_csv(http, session, DN_CARD_ID,  label="DN")
 
-          oms_rows = [slim(r, OMS_COLS) for r in csv.DictReader(StringIO(raw_oms))]
-          dn_rows  = [slim(r, DN_COLS)  for r in csv.DictReader(StringIO(raw_dn))]
+          oms_rows = list(csv.DictReader(StringIO(raw_oms)))
+          dn_rows  = list(csv.DictReader(StringIO(raw_dn)))
 
-          valid_ids = {r['SSE ID'].upper() for r in oms_rows if r['SSE ID'].strip()}
-          dn_lookup = {}
-          for row in dn_rows:
-              key = row['DN_SSE_ID'].upper()
-              if key in valid_ids:
-                  dn_lookup.setdefault(key, []).append(row)
+          # Create lookup for DN data indexed by customer ID
+          dn_lookup = {row['customer'].strip().upper(): row for row in dn_rows if row.get('customer')}
 
           merged = []
           for oms in oms_rows:
-              key   = oms['SSE ID'].upper()
-              items = dn_lookup.get(key, [])
+              sse_id = oms.get('SSE ID', '').strip().upper()
+              dn_data = dn_lookup.get(sse_id, {})
 
-              if not items:
-                  merged.append({h: oms.get(h, '') for h in FINAL_HEADERS})
-              else:
-                  for dn in items:
-                      row = {h: oms.get(h, '') for h in FINAL_HEADERS}
-                      for col in DN_COLS.values():
-                          if col in row: row[col] = dn[col]
-
-                      # Rate correction
-                      try:
-                          q = float(row['qty']) if row['qty'] else 0
-                          n = row['item_name']
-                          if "545 Wp Mono Bifacial Non DCR-PREMIER" in n:
-                              row['rate']   = RATE_545_NON_DCR
-                              row['amount'] = round(q * RATE_545_NON_DCR, 2)
-                          elif "540 Wp Mono Bifacial DCR-PREMIER" in n:
-                              row['rate']   = RATE_540_DCR
-                              row['amount'] = round(q * RATE_540_DCR, 2)
-                      except: pass
-                      merged.append(row)
+              # Build the final row
+              row = {}
+              # Fill OMS Data
+              for csv_col, internal_name in OMS_COLS.items():
+                  row[internal_name] = oms.get(csv_col, '')
+              
+              # Fill DN Data (COGS)
+              row['posting_date'] = dn_data.get('posting_date', '')
+              row['amount']       = dn_data.get('Total_Amount', 0)
+              row['module_cost']  = dn_data.get('Module', 0)
+              row['inverter_cost']= dn_data.get('Inverter', 0)
+              
+              merged.append(row)
 
           # --- STORAGE ---
           TMP  = "/tmp/data_tmp.csv"
@@ -180,6 +154,7 @@ jobs:
 
       - name: Generate projects JSON
         run: |
+          # Ensure this script exists in your repo or add its logic here
           python3 generate_projects_json.py
 
       - name: Commit and Push
