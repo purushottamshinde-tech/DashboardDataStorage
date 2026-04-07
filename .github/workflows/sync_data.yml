@@ -33,18 +33,21 @@ jobs:
           from requests.adapters import HTTPAdapter
           from urllib3.util.retry import Retry
 
-          # --- CONFIG ---
+          # ─── CONFIG ────────────────────────────────────────────────────────────────
           METABASE_URL     = "https://metabase-lighthouse.solarsquare.in"
           USERNAME         = "devika.g@solarsquare.in"
           PASSWORD         = "Devika@2025"
           OMS_CARD_ID      = 2154
           DN_CARD_ID       = 2106
           RATE_545_NON_DCR = 8134.52
-          RATE_540_DCR      = 12065.00
+          RATE_540_DCR     = 12065.00
 
-          # --- COLUMN MAPPING ---
+          # Path to ERP categorization CSV committed in this repo
+          ERP_CSV_PATH     = "GMB_GMP_GMI_Mar_26_ERP_Categorization.csv"
+
+          # ─── COLUMN MAPPING ────────────────────────────────────────────────────────
           OMS_COLS = {
-              'SSE ID'                        : 'SSE ID',
+              'SSE ID'                      : 'SSE ID',
               'Installation Completion Date': 'Installation Completion Date',
               'Cell Name'                   : 'Cell Name',
               'City'                        : 'City',
@@ -52,10 +55,12 @@ jobs:
               'Project Size (kW)'           : 'Project Size (kW)',
               'Offer Type'                  : 'Offer Type',
               'Phase Connection'            : 'Phase Connection',
-              'Final Revenue'                : 'Final Revenue',
+              'Final Revenue'               : 'Final Revenue',
               'Final Revenue Excl. GST'     : 'Final Revenue Excl. GST',
           }
 
+          # These are the exact column names returned by Metabase DN card 2106.
+          # 'customer' holds the SSE ID in the DN export.
           DN_COLS = {
               'customer'        : 'DN_SSE_ID',
               'posting_date'    : 'posting_date',
@@ -75,20 +80,29 @@ jobs:
               'SSE ID', 'Installation Completion Date', 'Cell Name',
               'City', 'State', 'Project Size (kW)', 'Offer Type', 'Phase Connection',
               'Final Revenue', 'Final Revenue Excl. GST',
-              'posting_date', 'item_code', 'item_name', 'item_category',
-              'item_subcategory', 'set_warehouse', 'warehouse',
+              'posting_date', 'item_code', 'item_name',
+              'item_category', 'item_subcategory',
+              'set_warehouse', 'warehouse',
               'qty', 'uom', 'rate', 'amount',
           ]
 
-          # --- HELPERS ---
+          # ─── HELPERS ───────────────────────────────────────────────────────────────
           def make_http():
               s = requests.Session()
-              retries = Retry(total=3, backoff_factor=30, status_forcelist=[502,503,504], allowed_methods=["POST"])
+              retries = Retry(
+                  total=3, backoff_factor=30,
+                  status_forcelist=[502, 503, 504],
+                  allowed_methods=["POST"]
+              )
               s.mount("https://", HTTPAdapter(max_retries=retries))
               return s
 
           def get_session(http):
-              r = http.post(f"{METABASE_URL}/api/session", json={"username": USERNAME, "password": PASSWORD}, timeout=60)
+              r = http.post(
+                  f"{METABASE_URL}/api/session",
+                  json={"username": USERNAME, "password": PASSWORD},
+                  timeout=60
+              )
               r.raise_for_status()
               return r.json()['id']
 
@@ -96,21 +110,67 @@ jobs:
               for attempt in range(3):
                   try:
                       print(f"  [{label}] Attempt {attempt+1}/3 ...")
-                      r = http.post(f"{METABASE_URL}/api/card/{cid}/query/csv", headers={"X-Metabase-Session": sid}, timeout=600)
+                      r = http.post(
+                          f"{METABASE_URL}/api/card/{cid}/query/csv",
+                          headers={"X-Metabase-Session": sid},
+                          timeout=600
+                      )
                       r.raise_for_status()
                       print(f"  [{label}] OK — {len(r.text):,} chars")
                       return r.text
                   except (requests.exceptions.ReadTimeout, requests.exceptions.ConnectionError) as e:
                       print(f"  [{label}] Timeout/error: {e}")
-                      if attempt == 2: raise
+                      if attempt == 2:
+                          raise
                       wait = 60 * (attempt + 1)
                       print(f"  [{label}] Waiting {wait}s before retry ...")
                       time.sleep(wait)
 
           def slim(row, col_map):
+              """Remap column names; return only the columns we care about."""
               return {new: str(row.get(old, '')).strip() for old, new in col_map.items()}
 
-          # --- EXECUTION ---
+          # ─── LOAD ERP LOOKUP ───────────────────────────────────────────────────────
+          # Keyed on item_code (case-insensitive).
+          # Provides: item_category, item_subcategory.
+          # Falls back to Item Group when category is blank.
+          erp_lookup = {}
+          if os.path.exists(ERP_CSV_PATH):
+              with open(ERP_CSV_PATH, newline='', encoding='utf-8-sig') as f:
+                  for row in csv.DictReader(f):
+                      code = row.get('Item Code', '').strip()
+                      if not code:
+                          continue
+                      cat    = row.get('Item category', '').strip()
+                      subcat = row.get('Item Sub-Category', '').strip()
+                      group  = row.get('Item Group', '').strip()
+                      erp_lookup[code.upper()] = {
+                          'item_category'   : cat    if cat    else group,   # fall back to group
+                          'item_subcategory': subcat if subcat else group,
+                      }
+              print(f"ERP lookup loaded — {len(erp_lookup):,} item codes")
+          else:
+              print(f"WARNING: ERP file not found at '{ERP_CSV_PATH}' — categories will be blank")
+
+          def enrich_dn_row(row):
+              """
+              Fill item_category / item_subcategory from ERP lookup when the DN
+              export leaves them blank (which it currently does for all rows).
+              """
+              code = row.get('item_code', '').strip().upper()
+              if not code:
+                  return row
+              erp = erp_lookup.get(code)
+              if not erp:
+                  return row
+              # Only overwrite if the DN value is blank
+              if not row.get('item_category', '').strip():
+                  row['item_category'] = erp['item_category']
+              if not row.get('item_subcategory', '').strip():
+                  row['item_subcategory'] = erp['item_subcategory']
+              return row
+
+          # ─── EXECUTION ─────────────────────────────────────────────────────────────
           http    = make_http()
           session = get_session(http)
 
@@ -123,27 +183,45 @@ jobs:
           oms_rows = [slim(r, OMS_COLS) for r in csv.DictReader(StringIO(raw_oms))]
           dn_rows  = [slim(r, DN_COLS)  for r in csv.DictReader(StringIO(raw_dn))]
 
+          print(f"OMS rows: {len(oms_rows):,}  |  DN rows: {len(dn_rows):,}")
+
+          # ─── ENRICH DN WITH ERP CATEGORIES ────────────────────────────────────────
+          dn_rows = [enrich_dn_row(r) for r in dn_rows]
+          enriched = sum(1 for r in dn_rows if r.get('item_category', '').strip())
+          print(f"DN rows with item_category after ERP enrichment: {enriched:,}")
+
+          # ─── MERGE OMS + DN ────────────────────────────────────────────────────────
           valid_ids = {r['SSE ID'].upper() for r in oms_rows if r['SSE ID'].strip()}
-          dn_lookup = {}
+
+          dn_lookup: dict[str, list] = {}
+          skipped_dn = 0
           for row in dn_rows:
               key = row['DN_SSE_ID'].upper()
               if key in valid_ids:
                   dn_lookup.setdefault(key, []).append(row)
+              else:
+                  skipped_dn += 1
+          print(f"DN rows matched to OMS: {sum(len(v) for v in dn_lookup.values()):,}  |  unmatched: {skipped_dn:,}")
 
           merged = []
+          oms_no_dn = 0
           for oms in oms_rows:
               key   = oms['SSE ID'].upper()
               items = dn_lookup.get(key, [])
 
               if not items:
+                  # OMS row with no DN lines — emit one blank row to preserve in output
                   merged.append({h: oms.get(h, '') for h in FINAL_HEADERS})
+                  oms_no_dn += 1
               else:
                   for dn in items:
                       row = {h: oms.get(h, '') for h in FINAL_HEADERS}
+                      # Copy all DN columns (item_category already enriched above)
                       for col in DN_COLS.values():
-                          if col in row: row[col] = dn[col]
+                          if col in FINAL_HEADERS:
+                              row[col] = dn.get(col, '')
 
-                      # Rate correction
+                      # ── Rate correction for specific panel SKUs ──────────────────
                       try:
                           q = float(row['qty']) if row['qty'] else 0
                           n = row['item_name']
@@ -153,10 +231,14 @@ jobs:
                           elif "540 Wp Mono Bifacial DCR-PREMIER" in n:
                               row['rate']   = RATE_540_DCR
                               row['amount'] = round(q * RATE_540_DCR, 2)
-                      except: pass
+                      except Exception:
+                          pass
+
                       merged.append(row)
 
-          # --- STORAGE ---
+          print(f"Merged rows: {len(merged):,}  |  OMS rows with no DN: {oms_no_dn:,}")
+
+          # ─── STORAGE ───────────────────────────────────────────────────────────────
           TMP  = "/tmp/data_tmp.csv"
           GZ   = "data.csv.gz"
           META = "data_meta.json"
@@ -170,12 +252,17 @@ jobs:
               shutil.copyfileobj(f_in, f_out)
 
           meta = {
-              "last_updated" : datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-              "total_rows"   : len(merged),
-              "oms_rows"     : len(oms_rows),
+              "last_updated"    : datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "total_rows"      : len(merged),
+              "oms_rows"        : len(oms_rows),
+              "dn_rows"         : len(dn_rows),
+              "dn_enriched"     : enriched,
+              "oms_no_dn"       : oms_no_dn,
           }
           with open(META, "w") as f:
               json.dump(meta, f, indent=2)
+
+          print("✅ Done")
           EOF
 
       - name: Generate projects JSON
