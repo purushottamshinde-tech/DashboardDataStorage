@@ -1163,7 +1163,7 @@ jobs:
 
           METABASE_URL     = "https://metabase-lighthouse.solarsquare.in"
           USERNAME         = "devika.g@solarsquare.in"
-          PASSWORD         = "Devika@2025"
+          PASSWORD         = "Metabasedevika123"
           OMS_CARD_ID      = 2154
           DN_CARD_ID       = 2106
           RATE_545_NON_DCR = 8134.52
