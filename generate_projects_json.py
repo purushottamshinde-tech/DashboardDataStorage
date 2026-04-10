@@ -78,6 +78,8 @@ NM_RATES = {
     'Varanasi':    (1350, 4350),
     'Noida':       (1350, 4350),
     'NCR':         (0, 0),
+    'Meerut':      (1350, 4350),
+    'Bareilly':    (1350, 4350),
     # South (others)
     'Kochi':       (3250, 6376),
     'Chennai':     (2763, 5011),
@@ -127,6 +129,8 @@ GM_RATES = {
     'Varanasi':    (0, 0),
     'Noida':       (0, 0),
     'NCR':         (0, 0),
+    'Meerut':      (0, 0),
+    'Bareilly':    (0, 0),
     # South (others)
     'Kochi':       (0, 0),
     'Chennai':     (0, 0),
@@ -160,11 +164,14 @@ def detect_inverter_phase(inv_item_name):
     return 'Single Phase'
 
 def calc_metering_backend(city, inv_phase, sanction_phase):
-    """Calculate backend metering = NM_rate(city, inv_phase) + GM_rate(city, sanction_phase).
-    NM uses Inverter Phase (detected from DN item name).
-    GM uses Sanction Phase (= Phase Connection from data.csv)."""
-    # NM lookup — keyed on inverter phase
-    nm_idx = 0 if (not inv_phase or 'single' in inv_phase.lower()) else 1
+    """Calculate backend metering = NM_rate(city, phase) + GM_rate(city, sanction_phase).
+    NM uses Sanction Phase (Phase Connection) as primary, with inverter phase as fallback.
+    GM uses Sanction Phase (= Phase Connection from data.csv).
+    Using sanction_phase for NM too gives better accuracy since detect_inverter_phase
+    can default single-phase for 3-phase projects when item name pattern is ambiguous."""
+    # NM lookup — use sanction_phase as primary (more reliable), inv_phase as fallback
+    phase_for_nm = sanction_phase if sanction_phase else inv_phase
+    nm_idx = 0 if (not phase_for_nm or 'single' in phase_for_nm.lower()) else 1
     nm = NM_RATES.get(city, (0, 0))
     # GM lookup — keyed on sanction/connection phase
     gm_idx = 0 if (not sanction_phase or 'single' in sanction_phase.lower()) else 1
@@ -311,6 +318,34 @@ CELL_CITY_STATE = {
     'Ahmednagar Expansion':{'c':'Ahmednagar','s':'MH West'},
 }
 
+def detect_inverter_type(item_name):
+    """Extract inverter type from DN item name for dashboard type-level analysis.
+    Returns simplified type string like '3 kW', '5 kW 3 Phase', '5 kW Hybrid', 'Enphase'."""
+    n = str(item_name)
+    # Skip batteries
+    if 'Battery' in n and 'Hybrid' in n:
+        return None
+    # Enphase microinverters
+    if 'ENPHASE' in n.upper() or 'Micro' in n.lower():
+        return 'Enphase'
+    # Extract kW rating
+    m = re.search(r'(\d+\.?\d*)\s*[kK][wW]', n)
+    if not m:
+        return 'Other'
+    kw = m.group(1)
+    # Normalize: remove trailing .0
+    try:
+        kw_f = float(kw)
+        kw = str(int(kw_f)) if kw_f == int(kw_f) else str(kw_f)
+    except: pass
+    # Check for Hybrid
+    if 'Hybrid' in n:
+        return f'{kw} kW Hybrid'
+    # Check for phase
+    if '3 Phase' in n or '3-Phase' in n or 'Three Phase' in n:
+        return f'{kw} kW 3 Phase'
+    return f'{kw} kW'
+
 MON_MAP = {'jan':0,'feb':1,'mar':2,'apr':3,'may':4,'jun':5,'jul':6,'aug':7,'sep':8,'oct':9,'nov':10,'dec':11}
 
 def parse_date(v):
@@ -420,6 +455,13 @@ unmapped_cells = defaultdict(int)   # Track unmapped cells for warning
 unmapped_cats  = defaultdict(int)   # Track categories not in CAT_KEY (diagnostic)
 excluded_count = 0
 
+# Sub-item aggregations for dashboard analysis
+proj_inv_types = defaultdict(lambda: defaultdict(lambda: {'qty':0,'amt':0}))  # sse → inv_type → {qty, amt}
+proj_mms_items = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: {'qty':0,'amt':0,'uom':''})))  # sse → subcat → item_name → {qty, amt, uom}
+proj_cable_items = defaultdict(lambda: defaultdict(lambda: {'qty':0,'amt':0,'cases':0}))  # sse → subcat → {qty, amt, cases}
+proj_onm_amt = defaultdict(float)   # sse → total ONM amount
+proj_qhse_amt = defaultdict(float)  # sse → total QHSE amount
+
 with gzip.open('data.csv.gz', 'rt', encoding='utf-8', errors='replace') as f:
     reader = csv.DictReader(f)
     for i, row in enumerate(reader):
@@ -439,7 +481,18 @@ with gzip.open('data.csv.gz', 'rt', encoding='utf-8', errors='replace') as f:
         raw_cat   = row['item_category'].strip()
         item_code = row['item_code'].strip()
         item_name = row['item_name'].strip()
+        item_subcat = row.get('item_subcategory', '').strip()
+        parent_dn = row.get('parent', '').strip()
+        uom = row.get('uom', '').strip()
         cat = resolve_cat(item_code, raw_cat)
+
+        # Track parent-based ONM and QHSE amounts
+        if parent_dn:
+            pl = parent_dn.lower()
+            if pl.startswith('onm'):
+                proj_onm_amt[sse] += amt
+            elif pl.startswith('qhse'):
+                proj_qhse_amt[sse] += amt
 
         # Track DN dump metering items (from the Excel SUMIFS part of the formula)
         if is_metering_dn_item(item_name):
@@ -470,7 +523,6 @@ with gzip.open('data.csv.gz', 'rt', encoding='utf-8', errors='replace') as f:
         if k2:
             project_map[sse][k2] = round(project_map[sse][k2] + amt, 2)
         elif cat:
-            # Track unmapped categories for diagnostic
             unmapped_cats[cat] += 1
 
         p = project_map[sse]
@@ -481,11 +533,27 @@ with gzip.open('data.csv.gz', 'rt', encoding='utf-8', errors='replace') as f:
             if not p['it']:
                 p['it'] = item_name; p['iq'] = qty
             # Detect inverter phase from DN item name (for NM rate lookup)
-            # Skip batteries — they aren't the main inverter
             if '_inv_phase' not in p or not p['_inv_phase']:
                 detected = detect_inverter_phase(item_name)
-                if detected:  # None = battery, skip
+                if detected:
                     p['_inv_phase'] = detected
+            # Track inverter type for type-level analysis
+            inv_type = detect_inverter_type(item_name)
+            if inv_type:
+                proj_inv_types[sse][inv_type]['qty'] += qty
+                proj_inv_types[sse][inv_type]['amt'] += amt
+
+        # Track MMS sub-items (Prefab MMS, Welded MMS, Tin Shed MMS)
+        if cat in ('Prefab MMS', 'Welded MMS', 'Tin Shed MMS') and item_subcat:
+            proj_mms_items[sse][item_subcat][item_name[:80]]['qty'] += qty
+            proj_mms_items[sse][item_subcat][item_name[:80]]['amt'] += amt
+            proj_mms_items[sse][item_subcat][item_name[:80]]['uom'] = uom
+
+        # Track cable sub-items
+        if cat == 'Cables' and item_subcat:
+            proj_cable_items[sse][item_subcat]['qty'] += qty
+            proj_cable_items[sse][item_subcat]['amt'] += amt
+            proj_cable_items[sse][item_subcat]['cases'] += 1
 
 print(f"Built {len(project_map):,} projects")
 print(f"  Excluded rows (dongles, Safety Lifeline, Civil Work): {excluded_count:,}")
@@ -543,13 +611,38 @@ if no_rate_cities:
 
 # ── Compute final COGS ────────────────────────────────────────────────────────
 projects = []
-for p in project_map.values():
-    # Remove internal-only fields before output
+for sse, p in project_map.items():
     p.pop('_inv_phase', None)
     cogs = round(p['mod']+p['inv']+p['prf']+p['cab']+p['ick']+p['con']+p['ear']+
                  p['jbx']+p['tsh']+p['saf']+p['ica']+p['wel']+p['ssn']+p['ebo']+
                  p['dlg']+p['mtr']+p['wkt'], 2)
-    projects.append({**p, 'cogs': cogs})
+
+    out = {**p, 'cogs': cogs}
+
+    # Add ONM and QHSE amounts from parent-based tracking
+    onm_val = proj_onm_amt.get(sse, 0)
+    qhse_val = proj_qhse_amt.get(sse, 0)
+    if onm_val: out['onm'] = round(onm_val, 2)
+    if qhse_val: out['qhs'] = round(qhse_val, 2)
+
+    # Add inverter type breakdown
+    ivt = proj_inv_types.get(sse)
+    if ivt:
+        out['ivt'] = {t: {'q': round(d['qty'],1), 'a': round(d['amt'],2)} for t, d in ivt.items()}
+
+    # Add MMS sub-item breakdown: {subcat: {item_name: {q, a, u}}}
+    mms = proj_mms_items.get(sse)
+    if mms:
+        out['msd'] = {}
+        for subcat, items in mms.items():
+            out['msd'][subcat] = {nm: {'q': round(d['qty'],2), 'a': round(d['amt'],2)} for nm, d in items.items()}
+
+    # Add cable sub-item breakdown: {subcat: {q, a, n}}
+    cab_items = proj_cable_items.get(sse)
+    if cab_items:
+        out['cbd'] = {sc: {'q': round(d['qty'],2), 'a': round(d['amt'],2), 'n': d['cases']} for sc, d in cab_items.items()}
+
+    projects.append(out)
 
 # ── Write output ──────────────────────────────────────────────────────────────
 json_str = json.dumps(projects, separators=(',',':'))
