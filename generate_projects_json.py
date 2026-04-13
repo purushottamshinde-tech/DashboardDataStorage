@@ -644,10 +644,46 @@ for sse, p in project_map.items():
 
     projects.append(out)
 
+# ── Calculate monthly ONM & QHSE totals from raw data ──────────────────────────
+# This ensures we capture ALL ONM/QHSE, not just those linked to specific projects
+monthly_onm_qhse = defaultdict(lambda: {'onm': 0, 'qhs': 0})
+
+with gzip.open('data.csv.gz', 'rt', encoding='utf-8', errors='replace') as f:
+    reader = csv.DictReader(f)
+    for row in reader:
+        parent = row.get('parent', '').strip()
+        posting_date_str = row.get('posting_date', '').strip()
+        amount = float(row.get('amount', 0) or 0)
+
+        if not posting_date_str or not parent:
+            continue
+
+        try:
+            date_obj = datetime.strptime(posting_date_str, '%Y-%m-%d')
+            month_key = f"{date_obj.year}-{date_obj.month:02d}"
+
+            if parent.lower().startswith('onm'):
+                monthly_onm_qhse[month_key]['onm'] += amount
+            elif parent.lower().startswith('qhse'):
+                monthly_onm_qhse[month_key]['qhs'] += amount
+        except:
+            pass
+
+# Create metadata object with monthly totals
+metadata = {
+    'monthly_onm_qhse': {k: {'onm': round(v['onm'], 2), 'qhs': round(v['qhs'], 2)} for k, v in monthly_onm_qhse.items()}
+}
+
 # ── Write output ──────────────────────────────────────────────────────────────
-json_str = json.dumps(projects, separators=(',',':'))
-with gzip.open('projects.json.gz', 'wt', encoding='utf-8', compresslevel=9) as f:
+output = {'_meta': metadata, 'projects': projects}
+json_str = json.dumps(output, separators=(',',':'))
+
+# Workaround for gzip.open issues on some filesystems:
+# Write to temp file, compress with system gzip, then move
+with open('projects_temp.json', 'w', encoding='utf-8') as f:
     f.write(json_str)
+os.system('gzip -9 projects_temp.json')
+os.system('mv projects_temp.json.gz projects.json.gz')
 
 raw_mb = len(json_str)/1e6
 gz_mb  = os.path.getsize('projects.json.gz')/1e6
