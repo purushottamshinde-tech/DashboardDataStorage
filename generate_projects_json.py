@@ -447,6 +447,43 @@ CAT_KEY = {
     'Electrical BoS':'ebo','Data Logger':'dlg','Metering':'mtr','Welcome Kit and Board':'wkt',
 }
 
+# ── Name shortening for dashboard display ─────────────────────────────────────
+def shorten_mms_item_name(name):
+    """Shorten MMS item names for cleaner dashboard display.
+    e.g. 'GM Bridge Column 2P 8FT ...' → 'Column 2P 8FT'
+    """
+    n = name.strip()
+    if not n:
+        return n
+    # Remove common prefixes: "GM Bridge", "Galvalume", brand prefixes
+    n = re.sub(r'^(?:GM\s+Bridge\s+)', '', n, flags=re.IGNORECASE)
+    n = re.sub(r'^(?:Galvalume\s+)', '', n, flags=re.IGNORECASE)
+    # Remove trailing codes like " - SKU-XXXX" or " (ITEM-CODE)"
+    n = re.sub(r'\s*-\s*(?:SKU|ITEM|PROD)[-\s]?\w+\s*$', '', n, flags=re.IGNORECASE)
+    n = re.sub(r'\s*\(\s*(?:SKU|ITEM|PROD)[-\s]?\w+\s*\)\s*$', '', n, flags=re.IGNORECASE)
+    # Remove " - SolarSquare" / " - Solar Square" suffix
+    n = re.sub(r'\s*-\s*Solar\s*Square.*$', '', n, flags=re.IGNORECASE)
+    # Trim to 80 chars
+    return n.strip()[:80]
+
+
+def shorten_cable_subcat(name):
+    """Shorten cable subcategory names for cleaner dashboard display.
+    e.g. 'Polycab 4 sqmm Cu DC Cable Red' → '4 sqmm Cu DC Cable'
+    """
+    n = name.strip()
+    if not n:
+        return n
+    # Remove brand prefixes
+    n = re.sub(r'^(?:Polycab|Havells|RR\s*Kabel|KEI|Finolex|Anchor)\s+', '', n, flags=re.IGNORECASE)
+    # Remove colour suffixes like " Red", " Black", " Blue/Black"
+    n = re.sub(r'\s+(?:Red|Black|Blue|Green|Yellow|White|Grey|Blue/Black|Red/Black)\s*$', '', n, flags=re.IGNORECASE)
+    # Remove trailing codes
+    n = re.sub(r'\s*-\s*(?:SKU|ITEM|PROD)[-\s]?\w+\s*$', '', n, flags=re.IGNORECASE)
+    n = re.sub(r'\s*-\s*Solar\s*Square.*$', '', n, flags=re.IGNORECASE)
+    return n.strip()
+
+
 # ── Build project map ─────────────────────────────────────────────────────────
 print("\nReading data.csv.gz...")
 project_map = {}
@@ -545,15 +582,17 @@ with gzip.open('data.csv.gz', 'rt', encoding='utf-8', errors='replace') as f:
 
         # Track MMS sub-items (Prefab MMS, Welded MMS, Tin Shed MMS)
         if cat in ('Prefab MMS', 'Welded MMS', 'Tin Shed MMS') and item_subcat:
-            proj_mms_items[sse][item_subcat][item_name[:80]]['qty'] += qty
-            proj_mms_items[sse][item_subcat][item_name[:80]]['amt'] += amt
-            proj_mms_items[sse][item_subcat][item_name[:80]]['uom'] = uom
+            short_name = shorten_mms_item_name(item_name)
+            proj_mms_items[sse][item_subcat][short_name]['qty'] += qty
+            proj_mms_items[sse][item_subcat][short_name]['amt'] += amt
+            proj_mms_items[sse][item_subcat][short_name]['uom'] = uom
 
         # Track cable sub-items
         if cat == 'Cables' and item_subcat:
-            proj_cable_items[sse][item_subcat]['qty'] += qty
-            proj_cable_items[sse][item_subcat]['amt'] += amt
-            proj_cable_items[sse][item_subcat]['cases'] += 1
+            short_cable = shorten_cable_subcat(item_subcat)
+            proj_cable_items[sse][short_cable]['qty'] += qty
+            proj_cable_items[sse][short_cable]['amt'] += amt
+            proj_cable_items[sse][short_cable]['cases'] += 1
 
 print(f"Built {len(project_map):,} projects")
 print(f"  Excluded rows (dongles, Safety Lifeline, Civil Work): {excluded_count:,}")
