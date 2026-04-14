@@ -448,22 +448,25 @@ CAT_KEY = {
 }
 
 # ── Name shortening for dashboard display ─────────────────────────────────────
-def shorten_mms_item_name(name):
+def shorten_mms_item_name(name, subcat=''):
     """Shorten MMS item names for cleaner dashboard display.
-    e.g. 'GM Bridge Column 2P 8FT ...' → 'Column 2P 8FT'
+    Column items: 'Column 2P 6FT Back Medium Gen 2 (150x100x1.6)' → '2P 6FT'
+    Other items: strip prefixes/suffixes
     """
     n = name.strip()
     if not n:
         return n
-    # Remove common prefixes: "GM Bridge", "Galvalume", brand prefixes
+    # For Column items: extract just "1P 6FT", "2P 8FT" etc.
+    if 'column' in n.lower() or 'column' in subcat.lower():
+        m = re.search(r'\b(\dP)\s+(\d+FT)\b', n, flags=re.IGNORECASE)
+        if m:
+            return m.group(1) + ' ' + m.group(2)
+    # General shortening for non-column MMS items
     n = re.sub(r'^(?:GM\s+Bridge\s+)', '', n, flags=re.IGNORECASE)
     n = re.sub(r'^(?:Galvalume\s+)', '', n, flags=re.IGNORECASE)
-    # Remove trailing codes like " - SKU-XXXX" or " (ITEM-CODE)"
     n = re.sub(r'\s*-\s*(?:SKU|ITEM|PROD)[-\s]?\w+\s*$', '', n, flags=re.IGNORECASE)
     n = re.sub(r'\s*\(\s*(?:SKU|ITEM|PROD)[-\s]?\w+\s*\)\s*$', '', n, flags=re.IGNORECASE)
-    # Remove " - SolarSquare" / " - Solar Square" suffix
     n = re.sub(r'\s*-\s*Solar\s*Square.*$', '', n, flags=re.IGNORECASE)
-    # Trim to 80 chars
     return n.strip()[:80]
 
 
@@ -582,7 +585,7 @@ with gzip.open('data.csv.gz', 'rt', encoding='utf-8', errors='replace') as f:
 
         # Track MMS sub-items (Prefab MMS, Welded MMS, Tin Shed MMS)
         if cat in ('Prefab MMS', 'Welded MMS', 'Tin Shed MMS') and item_subcat:
-            short_name = shorten_mms_item_name(item_name)
+            short_name = shorten_mms_item_name(item_name, item_subcat)
             proj_mms_items[sse][item_subcat][short_name]['qty'] += qty
             proj_mms_items[sse][item_subcat][short_name]['amt'] += amt
             proj_mms_items[sse][item_subcat][short_name]['uom'] = uom
