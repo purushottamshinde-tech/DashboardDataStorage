@@ -21,6 +21,15 @@ import gzip, csv, io, json, os, re, sys
 from collections import defaultdict
 from datetime import datetime
 
+# ── Cohort assignment (QCD-based) ────────────────────────────────────────────
+# Cohorts are assigned by QCD (Quote Completion Date), NOT installation date.
+# QCD is loaded from booking_dump.csv (exported from OMS import sheet).
+# Pricing cohort definitions come from pricing cohorts.xlsx.
+# GZ offers: 'GoodZero', 'GoodZero Pro', 'GoodZero Uno', 'GoodZero+'
+# Non-GZ offers: 'Regular', 'regular', 'SSE Blue', '' (blank), etc.
+
+GZ_OFFERS_SET = {'GoodZero', 'GoodZero Pro', 'GoodZero Uno', 'GoodZero+'}
+
 # ── Configuration ────────────────────────────────────────────────────────────
 CIVL_TO_ELEC   = {'CIVL-0012','CIVL-0013','CIVL-0014','CIVL-0015','CIVL-0016'}
 METERING_REMAP = {'ACDB-2449-EATON'}
@@ -360,7 +369,236 @@ def parse_date(v):
         except: pass
     try: return datetime.strptime(v.strip(), '%Y-%m-%d')
     except: pass
+    try: return datetime.strptime(v.strip(), '%d/%m/%Y')
+    except: pass
+    try: return datetime.strptime(v.strip(), '%Y/%m/%d')
+    except: pass
     return None
+
+
+# ── Pricing Cohort Loader ─────────────────────────────────────────────────────
+# Loads cohort date ranges from pricing cohorts.xlsx.
+# Returns two sorted lists: [(start, end_or_None, name), ...] for GZ and Non-GZ.
+# 'end' is inclusive; None means open-ended (current cohort).
+
+def load_pricing_cohorts(filepath='pricing cohorts.xlsx'):
+    """Load GZ and Non-GZ cohort date ranges from pricing cohorts.xlsx."""
+    gz_cohorts   = []   # list of (start_date, end_date_or_None, cohort_name)
+    non_gz_cohorts = []
+    try:
+        import openpyxl
+        wb = openpyxl.load_workbook(filepath, data_only=True)
+        ws = wb['Sheet1']
+        rows = list(ws.iter_rows(min_row=3, max_row=ws.max_row, values_only=True))  # skip 2 header rows
+        for r in rows:
+            gz_start, gz_end, gz_name = r[0], r[1], r[2]
+            ngz_start, ngz_end, ngz_name = r[3], r[4], r[5]
+            if gz_name and gz_start:
+                s = gz_start if isinstance(gz_start, datetime) else parse_date(str(gz_start))
+                e = gz_end   if isinstance(gz_end,   datetime) else (parse_date(str(gz_end)) if gz_end else None)
+                if s: gz_cohorts.append((s, e, str(gz_name).strip()))
+            if ngz_name:
+                s = ngz_start if isinstance(ngz_start, datetime) else (parse_date(str(ngz_start)) if ngz_start else None)
+                e = ngz_end   if isinstance(ngz_end,   datetime) else (parse_date(str(ngz_end))   if ngz_end   else None)
+                non_gz_cohorts.append((s, e, str(ngz_name).strip()))
+        gz_cohorts.sort(key=lambda x: x[0])
+        non_gz_cohorts.sort(key=lambda x: (x[0] or datetime.min))
+        print(f"  Loaded {len(gz_cohorts)} GZ cohorts, {len(non_gz_cohorts)} Non-GZ cohorts from {filepath}")
+    except ImportError:
+        print("  ⚠ openpyxl not installed — cohort assignment disabled. Run: pip install openpyxl")
+    except FileNotFoundError:
+        print(f"  ⚠ {filepath} not found — cohort assignment disabled.")
+    except Exception as ex:
+        print(f"  ⚠ Could not load pricing cohorts: {ex}")
+    return gz_cohorts, non_gz_cohorts
+
+GZ_COHORTS, NON_GZ_COHORTS = load_pricing_cohorts()
+
+
+def assign_cohort(qcd_date, offer_type):
+    """Assign a pricing cohort name based on QCD date and offer type.
+
+    Args:
+        qcd_date: datetime object (Quote Completion Date from booking dump)
+        offer_type: str — raw offer from OMS/DN ('GoodZero', 'Regular', 'SSE Blue', etc.)
+
+    Returns:
+        str: cohort name, or '' if QCD date is missing or no cohort matches.
+
+    Boundary rule: end date is EXCLUSIVE (cohort covers start <= qcd < end).
+    This means when two cohorts share the same date (e.g., 9th Apr ends, 15th Apr starts,
+    both listing Apr 15), a QCD of Apr 15 falls into the NEWER cohort ("15th Apr Onwards").
+    This matches the business logic: the cohort name says "15th Apr Onwards" — Apr 15 IS
+    the start of that cohort, not the last day of the previous one.
+    """
+    if not qcd_date:
+        return ''
+    is_gz = offer_type.strip().replace('GoodZero+','GoodZero') in GZ_OFFERS_SET
+    cohorts = GZ_COHORTS if is_gz else NON_GZ_COHORTS
+    # Iterate in REVERSE so newer (later-starting) cohorts take priority at shared boundaries
+    for (start, end, name) in reversed(cohorts):
+        if start is None:
+            # open-start bucket (e.g. "Before Amit's pricing") — end is inclusive here
+            if end and qcd_date <= end:
+                return name
+        else:
+            # end is exclusive: cohort covers [start, end)
+            if qcd_date >= start and (end is None or qcd_date < end):
+                return name
+    return ''
+
+
+# ── Booking Dump Loader (QCD dates) ──────────────────────────────────────────
+# PRIMARY:  Fetches live from Google Sheets every time the script runs.
+#           Sheet is public (anyone with link) — no auth required.
+#           URL = OMS Import Sheet → "Booking Dump" tab (gid=628408580)
+# FALLBACK: If the fetch fails (no internet, quota, etc.), reads local
+#           booking_dump.csv cached from the last successful fetch.
+#
+# Output: dict  { sse_id: {'qcd': datetime_or_None, 'offer': str} }
+
+BOOKING_DUMP_URL = (
+    'https://docs.google.com/spreadsheets/d/'
+    '1NmE-MH9NyLFcbX1JH--j3yqT32sahvJGj82uFK6l9CY'
+    '/gviz/tq?tqx=out:csv&gid=628408580'
+)
+BOOKING_DUMP_CACHE = 'booking_dump.csv'   # local cache written after every successful fetch
+
+
+def _detect_booking_cols(headers):
+    """Auto-detect SSE ID, QCD date, and Offer Type column names.
+    Handles trailing spaces, slashes, mixed case (e.g. 'QCD / LQUD ').
+    Returns (sse_col, qcd_col, offer_col) — offer_col may be None."""
+    sse_col = qcd_col = offer_col = None
+    for h in headers:
+        hl = h.strip().lower().replace(' ','').replace('_','').replace('-','').replace('/','')
+        if not sse_col and hl in ('sseid','ssid','projectid','projid','sseno','sse'):
+            sse_col = h
+        if not qcd_col and hl in ('qcd','qcdlqud','lqud','qcddate','quotecompletiondate',
+                                   'quoteclosuredate','quotationdate','closuredate',
+                                   'quotedate','qcdate','quotationcreationdate'):
+            qcd_col = h
+        if not offer_col and hl in ('offertype','offeringtype','offer','product',
+                                    'producttype','schemetype'):
+            offer_col = h
+    # Broader fallbacks
+    if not sse_col:
+        for h in headers:
+            if 'sse' in h.lower(): sse_col = h; break
+    if not qcd_col:
+        for h in headers:
+            hl = h.strip().lower()
+            if 'qcd' in hl or 'lqud' in hl: qcd_col = h; break
+    return sse_col, qcd_col, offer_col
+
+
+def _parse_booking_rows(rows_raw):
+    """Convert raw DictReader rows into qcd_map.
+    Strips trailing spaces from all keys and values."""
+    qcd_map = {}
+    if not rows_raw:
+        return qcd_map
+    headers = list(rows_raw[0].keys())
+    sse_col, qcd_col, offer_col = _detect_booking_cols(headers)
+    if not sse_col:
+        print(f"    ⚠ SSE ID column not found. Headers: {headers[:10]}")
+        return qcd_map
+    if not qcd_col:
+        print(f"    ⚠ QCD date column not found. Headers: {headers[:15]}")
+        print(f"       Expected: 'QCD', 'QCD / LQUD', 'LQUD', 'QCD Date', etc.")
+        return qcd_map
+    loaded = 0
+    for row in rows_raw:
+        sse = row.get(sse_col, '').strip()
+        if not sse:
+            continue
+        qcd_raw = row.get(qcd_col, '')
+        qcd_dt = None
+        if isinstance(qcd_raw, datetime):
+            qcd_dt = qcd_raw
+        elif qcd_raw:
+            qcd_dt = parse_date(str(qcd_raw).strip())
+        offer_raw = row.get(offer_col, '').strip() if offer_col else ''
+        qcd_map[sse] = {'qcd': qcd_dt, 'offer': offer_raw}
+        loaded += 1
+    valid = sum(1 for v in qcd_map.values() if v['qcd'])
+    print(f"    Parsed {loaded:,} rows → {valid:,} with valid QCD dates")
+    return qcd_map
+
+
+def load_booking_dump():
+    """Fetch QCD dates from Google Sheets (live) with local CSV fallback.
+
+    Flow:
+      1. Fetch live CSV from BOOKING_DUMP_URL (public Google Sheet).
+      2. On success → parse, save to BOOKING_DUMP_CACHE, return map.
+      3. On any failure → warn, read BOOKING_DUMP_CACHE instead.
+      4. If cache also missing → return empty map (cohort field stays blank).
+    """
+    import urllib.request, io
+
+    qcd_map = {}
+
+    # ── Step 1: Try live fetch ────────────────────────────────────────────────
+    print(f"  Fetching booking dump from Google Sheets...")
+    fetched_csv = None
+    try:
+        req = urllib.request.Request(
+            BOOKING_DUMP_URL,
+            headers={'User-Agent': 'Mozilla/5.0'}
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            fetched_csv = resp.read().decode('utf-8', errors='replace')
+        print(f"    ✅ Fetched {len(fetched_csv):,} chars from Google Sheets")
+    except Exception as ex:
+        print(f"    ⚠ Live fetch failed: {ex}")
+
+    # ── Step 2: Parse fetched CSV if we got it ────────────────────────────────
+    if fetched_csv:
+        try:
+            reader = csv.DictReader(io.StringIO(fetched_csv))
+            rows_raw = list(reader)
+            if rows_raw:
+                qcd_map = _parse_booking_rows(rows_raw)
+                if qcd_map:
+                    # Save as local cache for next fallback
+                    try:
+                        with open(BOOKING_DUMP_CACHE, 'w', encoding='utf-8', newline='') as f:
+                            writer = csv.DictWriter(f, fieldnames=list(rows_raw[0].keys()))
+                            writer.writeheader()
+                            writer.writerows(rows_raw)
+                        print(f"    💾 Cached {len(rows_raw):,} rows → {BOOKING_DUMP_CACHE}")
+                    except Exception as cache_ex:
+                        print(f"    ⚠ Could not save cache: {cache_ex}")
+                    return qcd_map
+            print("    ⚠ Fetched CSV was empty — falling back to cache")
+        except Exception as parse_ex:
+            print(f"    ⚠ Could not parse fetched CSV: {parse_ex} — falling back to cache")
+
+    # ── Step 3: Fallback to local cache ──────────────────────────────────────
+    if os.path.isfile(BOOKING_DUMP_CACHE):
+        print(f"  Reading cached booking dump from {BOOKING_DUMP_CACHE}...")
+        try:
+            with open(BOOKING_DUMP_CACHE, 'r', encoding='utf-8', errors='replace') as f:
+                rows_raw = list(csv.DictReader(f))
+            qcd_map = _parse_booking_rows(rows_raw)
+            if qcd_map:
+                import os as _os
+                mtime = datetime.fromtimestamp(_os.path.getmtime(BOOKING_DUMP_CACHE))
+                print(f"    ⚠ Using cached data (last updated: {mtime.strftime('%Y-%m-%d %H:%M')})")
+                return qcd_map
+        except Exception as ex:
+            print(f"    ⚠ Could not read cache: {ex}")
+
+    # ── Step 4: Nothing worked ────────────────────────────────────────────────
+    print("  ⚠ Booking dump unavailable — cohort field will be blank for all projects.")
+    print(f"    Fix: ensure the Google Sheet is public OR place {BOOKING_DUMP_CACHE} locally.")
+    return qcd_map
+
+
+print("\nLoading booking dump (QCD dates)...")
+QCD_MAP = load_booking_dump()
+print(f"  QCD map size: {len(QCD_MAP):,} projects")
 
 
 # ── ERP Categorization ───────────────────────────────────────────────────────
@@ -546,11 +784,22 @@ with gzip.open('data.csv.gz', 'rt', encoding='utf-8', errors='replace') as f:
             if cell and not cs and not city:
                 unmapped_cells[cell] += 1
             d    = parse_date(row['Installation Completion Date'])
-            offer= row['Offer Type'].strip().replace('GoodZero+','GoodZero')
+            offer_raw = row['Offer Type'].strip()
+            offer= offer_raw.replace('GoodZero+','GoodZero')
             phase= row['Phase Connection'].strip()
+
+            # ── Cohort assignment via QCD date from booking dump ──────────────
+            qcd_rec = QCD_MAP.get(sse, {})
+            qcd_dt  = qcd_rec.get('qcd', None)
+            # Use offer from booking dump if available (more authoritative), else DN offer
+            cohort_offer = qcd_rec.get('offer', '') or offer_raw
+            cohort = assign_cohort(qcd_dt, cohort_offer)
+
             project_map[sse] = {
                 'id':sse,'c':city,'s':state,'o':offer,'ph':phase,
                 'kw':kw,'rev':round(rev,2),'dt':d.strftime('%Y-%m-%d') if d else '',
+                'qcd': qcd_dt.strftime('%Y-%m-%d') if qcd_dt else '',
+                'cohort': cohort,
                 'mod':0,'inv':0,'prf':0,'cab':0,'ick':0,'con':0,'ear':0,'jbx':0,
                 'tsh':0,'saf':0,'ica':0,'wel':0,'ssn':0,'ebo':0,'dlg':0,'mtr':0,'wkt':0,
                 'mt':'','mq':0,'it':'','iq':0,
@@ -720,12 +969,17 @@ metadata = {
 output = {'_meta': metadata, 'projects': projects}
 json_str = json.dumps(output, separators=(',',':'))
 
-# Workaround for gzip.open issues on some filesystems:
-# Write to temp file, compress with system gzip, then move
+# Write compressed output using Python gzip (avoids shell gzip permission issues)
+import shutil
 with open('projects_temp.json', 'w', encoding='utf-8') as f:
     f.write(json_str)
-os.system('gzip -9 projects_temp.json')
-os.system('mv projects_temp.json.gz projects.json.gz')
+with open('projects_temp.json', 'rb') as f_in, \
+     gzip.open('projects.json.gz', 'wb', compresslevel=6) as f_out:
+    shutil.copyfileobj(f_in, f_out)
+try:
+    os.remove('projects_temp.json')
+except Exception:
+    pass
 
 raw_mb = len(json_str)/1e6
 gz_mb  = os.path.getsize('projects.json.gz')/1e6
@@ -757,3 +1011,16 @@ for mo, label, actual_mtr in [(1, 'Jan 26', 5926077), (2, 'Feb 26', 5755707), (3
     delta = mtr - actual_mtr
     pct   = delta / actual_mtr * 100 if actual_mtr else 0
     print(f"  {label}: Metering={mtr:,.0f} (actual {actual_mtr:,.0f}, delta {delta:+,.0f} = {pct:+.2f}%)")
+
+# ── Cohort Coverage Report ────────────────────────────────────────────────────
+print("\n── Cohort Assignment Coverage ──")
+total_p = len(projects)
+with_cohort = sum(1 for p in projects if p.get('cohort',''))
+with_qcd    = sum(1 for p in projects if p.get('qcd',''))
+print(f"  Projects with QCD date : {with_qcd:,} / {total_p:,} ({with_qcd/total_p*100:.1f}%)")
+print(f"  Projects with cohort   : {with_cohort:,} / {total_p:,} ({with_cohort/total_p*100:.1f}%)")
+if with_cohort < total_p:
+    missing = total_p - with_cohort
+    print(f"  \u26a0 {missing:,} projects have no cohort (missing from booking dump or QCD blank)")
+
+print("\nDone.")
