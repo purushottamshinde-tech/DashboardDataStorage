@@ -287,23 +287,23 @@ def build(data):
 
     kpi_html = (
         '<table class="kpi-t"><tr>'
-        + kc('Orders MTD', '{:,}'.format(mtd['n']),
+        + kc('Installations MTD', '{:,}'.format(mtd['n']),
              '{} vs {:,} {} (1-{})'.format(dpct(mtd['n'],pm['n']),pm['n'],prev_lbl,pm_day))
         + kc('kW MTD', '{:,.0f}'.format(mtd['kw']),
              '{} vs {:,.0f} kW {}'.format(dpct(mtd['kw'],pm['kw']),pm['kw'],prev_lbl))
-        + kc('GM Inst % MTD', '{:.2f}%'.format(mtd['gm']),
+        + kc('GM % MTD', '{:.2f}%'.format(mtd['gm']),
              '{} vs {:.2f}% {}'.format(dpp(mtd['gm']-pm['gm']),pm['gm'],prev_lbl), gmc(mtd['gm']))
-        + kc('Adjusted GM % MTD', '{:.2f}%'.format(mtd['adj_gm']),
-             '{} vs {:.2f}% {}'.format(dpp(mtd['adj_gm']-pm['adj_gm']),pm['adj_gm'],prev_lbl), gmc(mtd['adj_gm']))
+        + kc('Revenue MTD', fc(mtd['rev']),
+             'vs {} {} &nbsp; {}'.format(fc(pm['rev']),prev_lbl,dpct(mtd['rev'],pm['rev'])))
         + '</tr><tr>'
-        + kc('Avg Order Size', '{:.2f} kW'.format(mtd['aos']),
+        + kc('Avg System Size', '{:.2f} kW'.format(mtd['aos']),
              'vs {:.2f} kW {} &nbsp; {}'.format(pm['aos'],prev_lbl,dpval(mtd['aos']-pm['aos'],'kW')))
         + kc('Avg Order Value', fc(mtd['aov']),
              'vs {} {}'.format(fc(pm['aov']),prev_lbl))
         + kc('Rev / Wp', '&#8377;{:.2f}'.format(mtd['rev_wp']),
              'vs &#8377;{:.2f} {} &nbsp; {}'.format(pm['rev_wp'],prev_lbl,dpval(mtd['rev_wp']-pm['rev_wp'],'&#8377;/Wp')))
-        + kc('Revenue MTD', fc(mtd['rev']),
-             'vs {} {} &nbsp; {}'.format(fc(pm['rev']),prev_lbl,dpct(mtd['rev'],pm['rev'])))
+        + kc('Abs GM MTD', fc(mtd['abs_gm']),
+             'vs {} {} &nbsp; {}'.format(fc(pm['abs_gm']),prev_lbl,dpct(mtd['abs_gm'],pm['abs_gm'])))
         + '</tr></table>'
     )
 
@@ -321,7 +321,7 @@ def build(data):
         '<div style="font-size:9.5px;color:#5A7A96;font-family:monospace;margin-bottom:10px">'
         +snap_note+'</div>'
         '<table class="snap-t"><tr>'
-        + sc('Orders -- {}'.format(lat_lbl), str(lat['n']),
+        + sc('Installations -- {}'.format(lat_lbl), str(lat['n']),
              'Prev ({}): {} &nbsp;&bull;&nbsp; MTD: {:,}'.format(prv_lbl,prv['n'],mtd['n']))
         + sc('kW -- {}'.format(lat_lbl), '{:.1f}'.format(lat['kw']),
              'Prev: {:.1f} kW &nbsp;&bull;&nbsp; MTD: {:,.0f}'.format(prv['kw'],mtd['kw']))
@@ -455,38 +455,51 @@ def build(data):
             '&#128176; <b>Pricing discipline working:</b> {}. '
             'Rev/Wp rising with volume holding -- identify what changed and replicate.'.format(names)))
 
-    # COGS insight -- data-driven root cause
-    cogs_up=[(lbl,val/cogs_total*100-pm_cogs.get(lbl,0)/pm['cogs']*100,
-              val/mtd['kw'] if mtd['kw'] else 0,
-              pm_cogs.get(lbl,0)/pm['kw'] if pm['kw'] else 0)
-             for lbl,val in cogs_items
-             if cogs_total and pm['cogs'] and val/cogs_total*100-pm_cogs.get(lbl,0)/pm['cogs']*100>0.3]
-    if cogs_up:
+    # COGS insight -- full picture with root cause
+    if cogs_total and pm['cogs'] and mtd['kw'] and pm['kw'] and mtd['rev'] and pm['rev']:
         aos_d = mtd['aos'] - pm['aos']
-        cogs_lines = []
-        for lbl,pp_d,pkw_c,pkw_p in cogs_up:
-            pkw_d = pkw_c - pkw_p
-            if lbl in ('MMS','Cables'):
-                if aos_d > 0.05:
-                    reason = ('AoS up {:.2f}kW -- larger installs need more structural runs per kW'
-                              .format(aos_d))
+        total_cogs_pkw_c = mtd['cogs']/mtd['kw']
+        total_cogs_pkw_p = pm['cogs']/pm['kw']
+        rising, falling = [], []
+        for lbl,val in cogs_items:
+            pp_c = val/cogs_total*100
+            pp_p = pm_cogs.get(lbl,0)/pm['cogs']*100
+            pkw_c = val/mtd['kw']; pkw_p = pm_cogs.get(lbl,0)/pm['kw']
+            gm_impact = -(val/mtd['rev'] - pm_cogs.get(lbl,0)/pm['rev'])*100
+            d = pp_c - pp_p
+            if d > 0.2:  rising.append((lbl, d, pkw_c, pkw_p, pkw_c-pkw_p, gm_impact))
+            elif d < -0.2: falling.append((lbl, d, pkw_c, pkw_p, pkw_c-pkw_p, gm_impact))
+
+        if rising or falling:
+            net_gm_impact = sum(x[5] for x in rising) + sum(x[5] for x in falling)
+            rise_parts = []
+            for lbl,d,pkw_c,pkw_p,pkw_d,gm_i in sorted(rising,key=lambda x:-x[1]):
+                if lbl in ('MMS','Cables') and aos_d > 0.05:
+                    cause = 'AoS +{:.2f}kW drives more structural material per kW'.format(aos_d)
                 else:
-                    reason = 'per-kW rate up &#8377;{:.0f}/kW -- check vendor pricing'.format(pkw_d)
-            else:
-                reason = 'per-kW rate shift of &#8377;{:.0f}/kW'.format(pkw_d)
-            cogs_lines.append(
-                '<b>{}</b> +{:.2f}pp (&#8377;{:.0f}/kW curr vs &#8377;{:.0f}/kW prev -- {})'.format(
-                    lbl, pp_d, pkw_c, pkw_p, reason))
-        insights.append(('ins-a',
-            '&#129521; <b>COGS mix shift:</b> {}. '
-            'Each +1pp in COGS share = direct GM compression.'.format('; '.join(cogs_lines))))
+                    cause = '&#8377;{:.0f}/kW rate increase'.format(pkw_d)
+                rise_parts.append('<b>{}</b> +{:.2f}pp (&#8377;{:,.0f}&#8594;&#8377;{:,.0f}/kW -- {})'.format(
+                    lbl, d, pkw_p, pkw_c, cause))
+            fall_parts = []
+            for lbl,d,pkw_c,pkw_p,pkw_d,gm_i in sorted(falling,key=lambda x:x[1]):
+                fall_parts.append('<b>{}</b> {:.2f}pp (&#8377;{:,.0f}&#8594;&#8377;{:,.0f}/kW)'.format(
+                    lbl, d, pkw_p, pkw_c))
+            msg = '&#129521; <b>COGS mix shift -- net {}{:.2f}pp on GM:</b> '.format(
+                '+' if net_gm_impact>=0 else '', net_gm_impact)
+            if rise_parts:
+                msg += 'Rising: {}. '.format('; '.join(rise_parts))
+            if fall_parts:
+                msg += 'Offsetting: {}. '.format('; '.join(fall_parts))
+            msg += 'Total COGS/kW &#8377;{:,.0f} vs &#8377;{:,.0f} prev.'.format(
+                total_cogs_pkw_c, total_cogs_pkw_p)
+            insights.append(('ins-a', msg))
 
     if latest.day>1:
         pace=mtd['n']/latest.day; proj=round(pace*30)
         mo_gm_proj=fc(mtd['abs_gm']/latest.day*30)
         insights.append(('ins-b',
-            '&#128202; <b>Month run-rate:</b> {:.1f} installs/day &rarr; '
-            '<b>~{:,} orders projected</b> for the full month '
+            '&#128202; <b>Month run-rate:</b> {:.1f} installations/day &rarr; '
+            '<b>~{:,} projected for full month</b> '
             '(vs {:,} actual in {}). At current GM, implies {} gross margin for the month.'.format(
             pace,proj,pm['n'],prev_lbl,mo_gm_proj)))
 
@@ -514,6 +527,7 @@ def build(data):
 <div class="ftr">Solar Square B2C GM &nbsp;&bull;&nbsp; Auto-generated from projects.json.gz &nbsp;&bull;&nbsp; """+latest.strftime('%d %b %Y')+"""</div>
 </div></body></html>"""
     return html, mtd, latest
+
 
 if __name__=='__main__':
     data=load_data()
