@@ -1,0 +1,34 @@
+name: Daily GM Report Email
+
+on:
+  # Manual trigger — use this for the trial run
+  workflow_dispatch:
+
+  # Daily at 8:30 AM IST (03:00 UTC)
+  schedule:
+    - cron: '0 3 * * *'
+
+  # Also fire automatically after the data sync workflow completes
+  workflow_run:
+    workflows: ["Sync Data"]
+    types: [completed]
+
+jobs:
+  send-report:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Send Daily GM Report
+        env:
+          GMAIL_PASSWORD: ${{ secrets.GMAIL_PASSWORD }}
+          GMAIL_USER: purushottam.shinde@solarsquare.in
+          REPORT_TO: shindepurushottam7460@gmail.com
+        run: python send_daily_report.py
