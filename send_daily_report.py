@@ -1,646 +1,488 @@
 #!/usr/bin/env python3
-"""
-Solar Square Daily GM Report Emailer  v2
-- Cluster vs its own previous month trend (not cluster-to-cluster)
-- AOV / AOS / COGS driver decomposition
-- Absolute GM MoM comparison
-- Latest data date auto-detected (not datetime.now())
-- No raw data dump — analysis + numbers only
-
-Usage:  GMAIL_PASSWORD=<app_pwd> python send_daily_report.py
-"""
-
+"""Solar Square Daily GM Report v3"""
 import gzip, json, os, smtplib, sys, calendar
 from collections import defaultdict
 from datetime import datetime, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
-# ── Config ────────────────────────────────────────────────────────────────────
 SENDER     = os.environ.get("GMAIL_USER", "purushottam.shinde@solarsquare.in")
 RECIPIENTS = os.environ.get("REPORT_TO",  "shindepurushottam7460@gmail.com").split(",")
 GMAIL_PASS = os.environ.get("GMAIL_PASSWORD", "")
 DATA_FILE  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "projects.json.gz")
+MIN_ORDERS = 10
 
 STATE_DISPLAY = {
     'Delhi':'Delhi','Gujrat':'Gujarat','Karnataka':'Karnataka',
-    'Madhya Pradesh':'Madhya Pradesh','MH East':'MH East','MH West':'MH West',
-    'Rajasthan':'Rajasthan','Tamil Nadu':'Tamil Nadu','Telangana':'Telangana',
-    'Uttar Pradesh':'Uttar Pradesh'
+    'Madhya Pradesh':'MP','MH East':'MH East','MH West':'MH West',
+    'Rajasthan':'Rajasthan','Tamil Nadu':'Tamil Nadu',
+    'Telangana':'Telangana','Uttar Pradesh':'UP'
 }
-STATE_ORDER = list(STATE_DISPLAY.keys())
-
 COGS_COLORS = {
     'Module':'#2563A8','Inverter':'#7C3AED','MMS':'#0891B2',
     'Cables':'#16A34A','Metering':'#D97706','I&C':'#E11D48','Other':'#94A3B8'
 }
 
-# ── Core helpers ──────────────────────────────────────────────────────────────
 def load_data():
-    print(f"Loading data...", flush=True)
     with gzip.open(DATA_FILE, 'rt', encoding='utf-8') as f:
         return json.load(f)
 
-def filter_projects(projects, start, end):
+def fp(projects, start, end):
     return [p for p in projects if p.get('dt') and start <= p['dt'] <= end]
 
 def calc(ps):
     if not ps:
-        return dict(n=0, kw=0.0, rev=0.0, cogs=0.0, onm=0.0, qhs=0.0,
-                    gm=0.0, adj_gm=0.0, rev_wp=0.0, aos=0.0, aov=0.0,
-                    abs_gm=0.0, cogs_kw=0.0,
-                    mod=0.0, inv=0.0, mms=0.0, cab=0.0, mtr=0.0, ic=0.0, oth=0.0)
-    n    = len(ps)
-    kw   = sum(p['kw']   for p in ps)
-    rev  = sum(p['rev']  for p in ps)
-    cogs = sum(p['cogs'] for p in ps)
-    onm  = sum(p.get('onm', 0) for p in ps)
-    qhs  = sum(p.get('qhs', 0) for p in ps)
-    gm      = (rev - cogs) / rev * 100              if rev else 0.0
-    adj_gm  = (rev - cogs - onm - qhs) / rev * 100 if rev else 0.0
-    rev_wp  = rev / (kw * 1000)                     if kw  else 0.0
-    cogs_kw = cogs / kw                             if kw  else 0.0
-    mod = sum(p.get('mod', 0)                                      for p in ps)
-    inv = sum(p.get('inv', 0)                                      for p in ps)
-    mms = sum(p.get('prf', 0) + p.get('tsh', 0) + p.get('wel', 0) for p in ps)
-    cab = sum(p.get('cab', 0)                                      for p in ps)
-    mtr = sum(p.get('mtr', 0)                                      for p in ps)
-    ic  = sum(p.get('ick', 0) + p.get('ica', 0)                   for p in ps)
-    oth = max(cogs - mod - inv - mms - cab - mtr - ic, 0.0)
-    return dict(n=n, kw=kw, rev=rev, cogs=cogs, onm=onm, qhs=qhs,
-                gm=gm, adj_gm=adj_gm, rev_wp=rev_wp, aos=kw/n, aov=rev/n,
-                abs_gm=rev-cogs, cogs_kw=cogs_kw,
-                mod=mod, inv=inv, mms=mms, cab=cab, mtr=mtr, ic=ic, oth=oth)
+        return dict(n=0,kw=0.,rev=0.,cogs=0.,onm=0.,qhs=0.,gm=0.,adj_gm=0.,
+                    rev_wp=0.,aos=0.,aov=0.,abs_gm=0.,cogs_kw=0.,
+                    mod=0.,inv=0.,mms=0.,cab=0.,mtr=0.,ic=0.,oth=0.)
+    n=len(ps); kw=sum(p['kw'] for p in ps); rev=sum(p['rev'] for p in ps)
+    cogs=sum(p['cogs'] for p in ps); onm=sum(p.get('onm',0) for p in ps)
+    qhs=sum(p.get('qhs',0) for p in ps)
+    gm=(rev-cogs)/rev*100 if rev else 0.
+    adj_gm=(rev-cogs-onm-qhs)/rev*100 if rev else 0.
+    rev_wp=rev/(kw*1000) if kw else 0.
+    cogs_kw=cogs/kw if kw else 0.
+    mod=sum(p.get('mod',0) for p in ps)
+    inv=sum(p.get('inv',0) for p in ps)
+    mms=sum(p.get('prf',0)+p.get('tsh',0)+p.get('wel',0) for p in ps)
+    cab=sum(p.get('cab',0) for p in ps)
+    mtr=sum(p.get('mtr',0) for p in ps)
+    ic=sum(p.get('ick',0)+p.get('ica',0) for p in ps)
+    oth=max(cogs-mod-inv-mms-cab-mtr-ic,0.)
+    return dict(n=n,kw=kw,rev=rev,cogs=cogs,onm=onm,qhs=qhs,
+                gm=gm,adj_gm=adj_gm,rev_wp=rev_wp,aos=kw/n,aov=rev/n,
+                abs_gm=rev-cogs,cogs_kw=cogs_kw,
+                mod=mod,inv=inv,mms=mms,cab=cab,mtr=mtr,ic=ic,oth=oth)
 
-def inject_meta_onm(m, mo_onm_qhse, key):
-    if m['onm'] == 0 and m['qhs'] == 0:
-        mok = mo_onm_qhse.get(key, {})
-        m = dict(m)
-        m['onm'] = mok.get('onm', 0)
-        m['qhs'] = mok.get('qhs', 0)
+def inject_meta(m, mo_onm_qhse, key):
+    if m['onm']==0 and m['qhs']==0:
+        mk=mo_onm_qhse.get(key,{})
+        m=dict(m); m['onm']=mk.get('onm',0); m['qhs']=mk.get('qhs',0)
         if m['rev']:
-            m['adj_gm'] = (m['rev'] - m['cogs'] - m['onm'] - m['qhs']) / m['rev'] * 100
+            m['adj_gm']=(m['rev']-m['cogs']-m['onm']-m['qhs'])/m['rev']*100
     return m
 
-def group_by_cluster(projects):
-    out = defaultdict(list)
-    for p in projects:
-        out[(p['s'], p['c'])].append(p)
-    return out
+def by_cluster(projects):
+    d=defaultdict(list)
+    for p in projects: d[(p['s'],p['c'])].append(p)
+    return d
 
-# ── Driver analysis ───────────────────────────────────────────────────────────
-def driver_analysis(curr, prev, gm_delta):
-    """
-    Decompose GM% change into its root causes.
-    Returns (primary_label, details_dict) for rendering.
-    """
-    if prev['n'] < 5:
-        return "Thin prev data", {}
-    if abs(gm_delta) < 0.15:
-        return "Stable", {}
-
-    rev_wp_d  = curr['rev_wp']  - prev['rev_wp']   # ₹/Wp pricing effect
-    aos_d     = curr['aos']     - prev['aos']       # kW system size effect
-    aov_d     = curr['aov']     - prev['aov']       # ₹ per order
-    cogs_kw_d = curr['cogs_kw'] - prev['cogs_kw']  # ₹/kW cost effect
-
-    factors = []
-
-    # 1. Pricing / Rev-per-Wp effect
-    if rev_wp_d > 1.2:
-        factors.append((abs(rev_wp_d) * 10, 'pricing_up',
-                        f"Rev/Wp ↑&#8377;{rev_wp_d:.1f}/Wp (pricing improvement)"))
-    elif rev_wp_d < -1.2:
-        factors.append((abs(rev_wp_d) * 10, 'pricing_down',
-                        f"Rev/Wp ↓&#8377;{abs(rev_wp_d):.1f}/Wp (pricing pressure / discounts)"))
-
-    # 2. System size effect (AoS)
-    if aos_d > 0.25:
-        factors.append((abs(aos_d) * 8, 'size_up',
-                        f"AoS ↑{aos_d:.2f} kW (larger systems → better economics)"))
-    elif aos_d < -0.25:
-        factors.append((abs(aos_d) * 8, 'size_down',
-                        f"AoS ↓{abs(aos_d):.2f} kW (smaller systems → thinner margins)"))
-
-    # 3. COGS per kW efficiency
-    if cogs_kw_d < -2500:
-        factors.append((abs(cogs_kw_d) / 1000, 'cogs_save',
-                        f"COGS/kW ↓&#8377;{abs(cogs_kw_d/1000):.1f}K (procurement saving)"))
-    elif cogs_kw_d > 2500:
-        factors.append((cogs_kw_d / 1000, 'cogs_rise',
-                        f"COGS/kW ↑&#8377;{cogs_kw_d/1000:.1f}K (cost inflation)"))
-
-    # 4. Fallback — AoV shift
+def get_driver(curr, prev):
+    if prev['n'] < MIN_ORDERS:
+        return '--', {}, 'Thin prior data'
+    d = dict(
+        rev_wp_d=curr['rev_wp']-prev['rev_wp'],
+        aos_d=curr['aos']-prev['aos'],
+        aov_d=curr['aov']-prev['aov'],
+        cogs_kw_d=curr['cogs_kw']-prev['cogs_kw'],
+    )
+    factors=[]
+    if d['rev_wp_d']>1.2:   factors.append((abs(d['rev_wp_d'])*10,'price_up','Pricing +Rs{:.1f}/Wp'.format(d['rev_wp_d'])))
+    elif d['rev_wp_d']<-1.2: factors.append((abs(d['rev_wp_d'])*10,'price_dn','Pricing -Rs{:.1f}/Wp'.format(abs(d['rev_wp_d']))))
+    if d['aos_d']>0.25:      factors.append((d['aos_d']*8,'size_up','AoS +{:.2f}kW'.format(d['aos_d'])))
+    elif d['aos_d']<-0.25:   factors.append((abs(d['aos_d'])*8,'size_dn','AoS {:.2f}kW'.format(d['aos_d'])))
+    if d['cogs_kw_d']<-2500: factors.append((abs(d['cogs_kw_d'])/1000,'cogs_dn','COGS -Rs{:.0f}/kW'.format(abs(d['cogs_kw_d']))))
+    elif d['cogs_kw_d']>2500:factors.append((d['cogs_kw_d']/1000,'cogs_up','COGS +Rs{:.0f}/kW'.format(d['cogs_kw_d'])))
     if not factors:
-        if abs(aov_d) > 20000:
-            d = '↑' if aov_d > 0 else '↓'
-            factors.append((1, 'mix',
-                            f"AoV {d}&#8377;{abs(aov_d/1000):.0f}K (product mix shift)"))
-        else:
-            return "Minor blended shifts", {
-                'rev_wp_d': rev_wp_d, 'aos_d': aos_d, 'cogs_kw_d': cogs_kw_d
-            }
+        return 'Stable', d, 'Minor blended shifts'
+    factors.sort(key=lambda x:-x[0])
+    tag='; '.join(f[2] for f in factors[:2])
+    types=[f[1] for f in factors[:2]]
+    return tag, dict(d,types=types), tag
 
-    factors.sort(key=lambda x: -x[0])
-    label = "; ".join(f[2] for f in factors[:2])
-    return label, {
-        'rev_wp_d': rev_wp_d,
-        'aos_d': aos_d,
-        'aov_d': aov_d,
-        'cogs_kw_d': cogs_kw_d,
-        'top_type': factors[0][1] if factors else None,
-    }
-
-# ── Formatting helpers ────────────────────────────────────────────────────────
 def fc(v):
-    if v >= 1e7: return f"&#8377;{v/1e7:.2f}Cr"
-    if v >= 1e5: return f"&#8377;{v/1e5:.1f}L"
-    return f"&#8377;{v:,.0f}"
+    if v>=1e7: return '&#8377;{:.2f}Cr'.format(v/1e7)
+    if v>=1e5: return '&#8377;{:.1f}L'.format(v/1e5)
+    return '&#8377;{:,.0f}'.format(v)
 
-def pp(delta, higher_better=True, decimals=2):
-    if abs(delta) < 0.01: return '<span style="color:#94A3B8">—</span>'
-    arrow = '↑' if delta > 0 else '↓'
-    color = '#16A34A' if (delta > 0) == higher_better else '#DC2626'
-    fmt = f".{decimals}f"
-    return f'<span style="color:{color};font-weight:700">{arrow}{abs(delta):{fmt}}pp</span>'
+def dpp(delta, hb=True):
+    if abs(delta)<0.01: return '<span style="color:#CBD5E1">--</span>'
+    arr='&uarr;' if delta>0 else '&darr;'
+    clr='#16A34A' if (delta>0)==hb else '#DC2626'
+    return '<span style="color:{};font-weight:700">{}{:.2f}pp</span>'.format(clr,arr,abs(delta))
 
-def pct_chg(curr, prev, higher_better=True):
-    if prev == 0: return ''
-    delta = (curr - prev) / abs(prev) * 100
-    if abs(delta) < 0.5: return '<span style="color:#94A3B8">—</span>'
-    arrow = '↑' if delta > 0 else '↓'
-    color = '#16A34A' if (delta > 0) == higher_better else '#DC2626'
-    return f'<span style="color:{color};font-weight:700">{arrow}{abs(delta):.0f}%</span>'
+def dpct(c, p, hb=True):
+    if p==0: return ''
+    delta=(c-p)/abs(p)*100
+    if abs(delta)<0.5: return '<span style="color:#CBD5E1">--</span>'
+    arr='&uarr;' if delta>0 else '&darr;'
+    clr='#16A34A' if (delta>0)==hb else '#DC2626'
+    return '<span style="color:{};font-weight:700">{}{:.0f}%</span>'.format(clr,arr,abs(delta))
 
-def gm_col(pct):
-    if pct >= 44:   return '#16A34A'
-    if pct >= 40:   return '#D97706'
+def dpval(delta, unit, hb=True):
+    if abs(delta)<0.01: return '<span style="color:#CBD5E1">--</span>'
+    arr='&uarr;' if delta>0 else '&darr;'
+    clr='#16A34A' if (delta>0)==hb else '#DC2626'
+    return '<span style="color:{};font-weight:700">{}{:.2f}{}</span>'.format(clr,arr,abs(delta),unit)
+
+def gmc(pct):
+    if pct>=44: return '#16A34A'
+    if pct>=40: return '#D97706'
     return '#DC2626'
 
-def kpi_card(label, val, sub='', val_color='#1A2C4E'):
-    return (f'<div class="kpi"><div class="kpi-lbl">{label}</div>'
-            f'<div class="kpi-val" style="color:{val_color}">{val}</div>'
-            f'<div class="kpi-sub">{sub}</div></div>')
+def gmcell(pct, fw='600'):
+    bg='#DCFCE7' if pct>=44 else ('#FEF3C7' if pct>=40 else '#FEE2E2')
+    return '<td style="background:{};color:{};font-weight:{};text-align:center">{:.1f}%</td>'.format(bg,gmc(pct),fw,pct)
 
-def trend_badge(gm_delta):
-    if gm_delta > 1.5:    return '<span class="badge badge-g">↑ Strong</span>'
-    if gm_delta > 0.3:    return '<span class="badge badge-g">↑ Improving</span>'
-    if gm_delta >= -0.3:  return '<span class="badge badge-n">→ Stable</span>'
-    if gm_delta >= -1.5:  return '<span class="badge badge-a">↓ Slipping</span>'
-    return '<span class="badge badge-r">↓ Alert</span>'
-
-# ── CSS ───────────────────────────────────────────────────────────────────────
 CSS = """
-body{font-family:'Segoe UI',Arial,sans-serif;background:#DDE8F5;margin:0;padding:20px}
-.wrap{max-width:960px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;
-      box-shadow:0 6px 32px rgba(26,44,78,0.15)}
-.hdr{background:linear-gradient(135deg,#1A2C4E 0%,#2563A8 100%);padding:22px 28px}
-.hdr-title{color:#fff;font-size:20px;font-weight:700;margin:0}
-.hdr-sub{color:rgba(255,255,255,0.55);font-size:10px;margin-top:5px;font-family:monospace;
-         letter-spacing:1px;text-transform:uppercase}
-.sec{padding:20px 28px;border-bottom:1px solid #E2EAF4}
-.sec-title{font-size:10.5px;font-weight:700;color:#1A2C4E;margin:0 0 14px;
-           text-transform:uppercase;letter-spacing:.9px;border-left:3px solid #2563A8;
-           padding-left:8px}
-.kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
-.kpi{background:#F5F8FC;border:1px solid #C8DCEE;border-radius:8px;padding:12px 14px}
-.kpi-lbl{font-size:8px;color:#5A7A96;text-transform:uppercase;letter-spacing:.8px;
-          font-family:monospace;margin-bottom:5px}
-.kpi-val{font-size:19px;font-weight:700;color:#1A2C4E;line-height:1}
-.kpi-sub{font-size:9px;color:#94A3B8;margin-top:5px;line-height:1.5}
-/* Cluster cards */
-.cluster-grid{display:flex;flex-direction:column;gap:8px}
-.cluster-card{border:1px solid #E2EAF4;border-radius:8px;padding:12px 16px;
-              background:#FAFCFF;border-left:4px solid #C8DCEE}
-.cluster-card.up{border-left-color:#16A34A;background:#F0FDF4}
-.cluster-card.down{border-left-color:#DC2626;background:#FEF2F2}
-.cluster-card.alert{border-left-color:#DC2626;background:#FEF2F2}
-.cluster-card.stable{border-left-color:#94A3B8;background:#F8FAFC}
-.cc-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
-.cc-name{font-size:13px;font-weight:700;color:#1A2C4E}
-.cc-state{font-size:10px;color:#94A3B8;margin-left:6px}
-.cc-metrics{display:flex;gap:16px;font-size:10.5px;margin-bottom:5px;flex-wrap:wrap}
-.cc-m{display:flex;flex-direction:column;gap:1px}
-.cc-ml{font-size:8px;color:#94A3B8;text-transform:uppercase;letter-spacing:.5px;font-family:monospace}
-.cc-mv{font-weight:600;color:#1A2C4E;font-size:12px}
-.cc-driver{font-size:10px;color:#374151;background:rgba(37,99,168,0.07);
-           padding:5px 9px;border-radius:5px;margin-top:4px;line-height:1.5}
-.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:9px;font-weight:700}
-.badge-g{background:#DCFCE7;color:#15803D}
-.badge-a{background:#FEF3C7;color:#92400E}
-.badge-r{background:#FEE2E2;color:#991B1B}
-.badge-n{background:#F1F5F9;color:#475569}
-.insight-block{background:#EFF6FF;border:1px solid #BFDBFE;border-radius:8px;
-               padding:12px 16px;margin-bottom:8px;font-size:11px;line-height:1.7;color:#1e3a5f}
-.insight-block b{color:#1A2C4E}
-/* Snap grid (today vs prev) */
-.snap-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
-.snap{background:#F5F8FC;border:1px solid #C8DCEE;border-radius:8px;padding:11px 13px}
-.snap-lbl{font-size:8px;color:#5A7A96;font-family:monospace;text-transform:uppercase;
-           letter-spacing:.7px;margin-bottom:4px}
-.snap-val{font-size:17px;font-weight:700;color:#1A2C4E;line-height:1}
-.snap-sub{font-size:9px;color:#94A3B8;margin-top:4px;line-height:1.5}
-/* COGS */
-.cbar{height:22px;border-radius:5px;overflow:hidden;display:flex;margin-bottom:10px}
-.cb{display:flex;align-items:center;justify-content:center;font-size:8.5px;color:#fff;
-    font-weight:600;overflow:hidden;white-space:nowrap;padding:0 4px}
-table.cogs{width:100%;border-collapse:collapse;font-size:11px}
-table.cogs th{background:#1A2C4E;color:#fff;padding:7px 10px;font-size:8px;
-              letter-spacing:.5px;text-transform:uppercase;text-align:left}
-table.cogs td{padding:6px 10px;border-bottom:1px solid #EBF2FA;color:#1A2C4E}
-table.cogs td.r{text-align:right}
-.divider{color:#C8DCEE;margin:0 6px;font-size:10px}
-.ftr{background:#F5F8FC;padding:14px 28px;font-size:9px;color:#94A3B8;text-align:center;line-height:1.7}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',Arial,sans-serif;background:#E4EDF7;padding:16px}
+.wrap{max-width:900px;margin:0 auto;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 4px 20px rgba(26,44,78,.14)}
+.hdr{background:linear-gradient(135deg,#1A2C4E,#1D4ED8);padding:20px 24px}
+.hdr-t{color:#fff;font-size:18px;font-weight:700}
+.hdr-s{color:rgba(255,255,255,.5);font-size:9px;margin-top:4px;font-family:monospace;letter-spacing:1.1px;text-transform:uppercase}
+.sec{padding:16px 24px;border-bottom:1px solid #EBF2FA}
+.sec-t{font-size:9px;font-weight:700;color:#1A2C4E;margin-bottom:12px;text-transform:uppercase;letter-spacing:1px;border-left:3px solid #1D4ED8;padding-left:7px}
+.summ{background:#EFF6FF;border:1px solid #BFDBFE;border-radius:8px;padding:13px 16px;font-size:12px;line-height:1.75;color:#1e3a5f}
+.kpi-t{width:100%;border-collapse:separate;border-spacing:7px}
+.kpi-c{background:#F5F8FC;border:1px solid #D4E4F4;border-radius:8px;padding:12px 14px;vertical-align:top;width:25%}
+.kpi-l{font-size:7.5px;color:#5A7A96;text-transform:uppercase;letter-spacing:.9px;font-family:monospace;display:block;margin-bottom:4px}
+.kpi-v{font-size:20px;font-weight:700;color:#1A2C4E;line-height:1;display:block}
+.kpi-d{font-size:8.5px;color:#94A3B8;margin-top:5px;line-height:1.5;display:block}
+.snap-t{width:100%;border-collapse:separate;border-spacing:7px}
+.snap-c{background:#F5F8FC;border:1px solid #D4E4F4;border-radius:8px;padding:10px 13px;vertical-align:top}
+.cbar{height:20px;border-radius:4px;overflow:hidden;display:flex;margin-bottom:10px}
+.cb{display:flex;align-items:center;justify-content:center;font-size:8px;color:#fff;font-weight:600;overflow:hidden;white-space:nowrap;padding:0 4px}
+.cl-t{width:100%;border-collapse:collapse;font-size:10.5px}
+.cl-t th{background:#1A2C4E;color:#fff;padding:7px 8px;font-size:7.5px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;text-align:center;white-space:nowrap}
+.cl-t th.L{text-align:left}
+.cl-t td{padding:6px 8px;border-bottom:1px solid #EBF2FA;text-align:center;white-space:nowrap;color:#1A2C4E}
+.cl-t td.L{text-align:left}
+.cl-t .grp td{background:#F0F4FA;font-size:7.5px;font-weight:700;color:#5A7A96;text-transform:uppercase;letter-spacing:.8px;padding:4px 8px}
+.cl-t tbody tr:hover td{background:#F7FAFF}
+.cg-t{width:100%;border-collapse:collapse;font-size:10.5px}
+.cg-t th{background:#1A2C4E;color:#fff;padding:6px 8px;font-size:7.5px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;text-align:left}
+.cg-t th.R{text-align:right}
+.cg-t td{padding:5px 8px;border-bottom:1px solid #EBF2FA;color:#1A2C4E}
+.cg-t td.R{text-align:right}
+.ins{border-radius:7px;padding:9px 13px;margin-bottom:7px;font-size:11px;line-height:1.65;border-left:4px solid}
+.ins-r{background:#FEF2F2;border-color:#EF4444;color:#7F1D1D}
+.ins-a{background:#FFFBEB;border-color:#F59E0B;color:#78350F}
+.ins-g{background:#F0FDF4;border-color:#22C55E;color:#14532D}
+.ins-b{background:#EFF6FF;border-color:#3B82F6;color:#1e3a5f}
+.ftr{background:#F5F8FC;padding:12px 24px;font-size:8.5px;color:#94A3B8;text-align:center;line-height:1.7}
+@media(max-width:600px){
+  .kpi-t,.kpi-t tbody,.kpi-t tr,.snap-t,.snap-t tbody,.snap-t tr{display:block!important}
+  .kpi-c,.snap-c{display:inline-block!important;width:calc(50% - 8px)!important;margin:3px!important;vertical-align:top}
+  body{padding:8px}
+}
 """
 
-# ── HTML builder ──────────────────────────────────────────────────────────────
-def build_html(data):
-    projects     = data['projects']
-    mo_onm_qhse  = data.get('_meta', {}).get('monthly_onm_qhse', {})
+def build(data):
+    projects    = data['projects']
+    mo_onm_qhse = data.get('_meta',{}).get('monthly_onm_qhse',{})
 
-    # Auto-detect latest date in data (don't trust datetime.now() — data may lag)
-    all_dates = [p['dt'] for p in projects if p.get('dt')]
-    latest_str = max(all_dates)
-    latest     = datetime.strptime(latest_str, '%Y-%m-%d')
-    prev_str   = (latest - timedelta(days=1)).strftime('%Y-%m-%d')
+    latest_str = max(p['dt'] for p in projects if p.get('dt'))
+    latest     = datetime.strptime(latest_str,'%Y-%m-%d')
+    prev_str   = (latest-timedelta(days=1)).strftime('%Y-%m-%d')
+    ms         = latest.strftime('%Y-%m-01')
+    mo_key     = latest.strftime('%Y-%m')
 
-    ms = latest.strftime('%Y-%m-01')
-    mo_key = latest.strftime('%Y-%m')
-
-    pm_last  = latest.replace(day=1) - timedelta(days=1)
-    pm_day   = min(latest.day, calendar.monthrange(pm_last.year, pm_last.month)[1])
+    pm_last  = latest.replace(day=1)-timedelta(days=1)
+    pm_day   = min(latest.day, calendar.monthrange(pm_last.year,pm_last.month)[1])
     pm_start = pm_last.replace(day=1).strftime('%Y-%m-01')
-    pm_end   = f"{pm_last.year}-{pm_last.month:02d}-{pm_day:02d}"
+    pm_end   = '{}-{:02d}-{:02d}'.format(pm_last.year,pm_last.month,pm_day)
     pm_key   = pm_last.strftime('%Y-%m')
-
-    # ── Filtered sets ──────────────────────────────────────────────────────────
-    mtd_ps  = filter_projects(projects, ms,      latest_str)
-    pm_ps   = filter_projects(projects, pm_start, pm_end)
-    lat_ps  = filter_projects(projects, latest_str, latest_str)
-    prev_ps = filter_projects(projects, prev_str,   prev_str)
-
-    mtd = inject_meta_onm(calc(mtd_ps),  mo_onm_qhse, mo_key)
-    pm  = inject_meta_onm(calc(pm_ps),   mo_onm_qhse, pm_key)
-    lat = calc(lat_ps)
-    prv = calc(prev_ps)
-
+    prev_lbl = pm_last.strftime('%b')
     curr_lbl = latest.strftime('%b %Y')
-    prev_lbl = pm_last.strftime('%b %Y')
     lat_lbl  = latest.strftime('%d %b')
-    prv_lbl  = (latest - timedelta(days=1)).strftime('%d %b')
+    prv_lbl  = (latest-timedelta(days=1)).strftime('%d %b')
 
-    # ── Section 1 — MTD KPIs ──────────────────────────────────────────────────
-    s1 = f"""<div class="kpi-grid">
-  {kpi_card('Orders Installed (MTD)', f'{mtd["n"]:,}',
-    f'{pct_chg(mtd["n"],pm["n"])} vs {pm["n"]:,} in {prev_lbl} (1–{pm_day})')}
-  {kpi_card('kW Installed (MTD)', f'{mtd["kw"]:,.1f}',
-    f'{pct_chg(mtd["kw"],pm["kw"])} vs {pm["kw"]:,.1f} kW last month')}
-  {kpi_card('Avg Order Size', f'{mtd["aos"]:.2f} kW',
-    f'vs {pm["aos"]:.2f} kW {prev_lbl} &nbsp;{pp(mtd["aos"]-pm["aos"],decimals=2)}')}
-  {kpi_card('Avg Order Value', fc(mtd["aov"]),
-    f'vs {fc(pm["aov"])} {prev_lbl}')}
-  {kpi_card('Revenue (MTD)', fc(mtd["rev"]),
-    f'vs {fc(pm["rev"])} {prev_lbl} &nbsp;{pct_chg(mtd["rev"],pm["rev"])}')}
-  {kpi_card('Rev / Wp', f'&#8377;{mtd["rev_wp"]:.2f}',
-    f'vs &#8377;{pm["rev_wp"]:.2f} {prev_lbl} &nbsp;{pp(mtd["rev_wp"]-pm["rev_wp"],decimals=2)}')}
-  {kpi_card('GM Inst % (MTD)', f'{mtd["gm"]:.2f}%',
-    f'{pp(mtd["gm"]-pm["gm"])} vs {pm["gm"]:.2f}% {prev_lbl}', gm_col(mtd["gm"]))}
-  {kpi_card('Adjusted GM % (MTD)', f'{mtd["adj_gm"]:.2f}%',
-    f'{pp(mtd["adj_gm"]-pm["adj_gm"])} vs {pm["adj_gm"]:.2f}% {prev_lbl}',
-    gm_col(mtd["adj_gm"]))}
-</div>"""
+    mtd_ps = fp(projects, ms,        latest_str)
+    pm_ps  = fp(projects, pm_start,  pm_end)
+    lat_ps = fp(projects, latest_str, latest_str)
+    prv_ps = fp(projects, prev_str,   prev_str)
 
-    # ── Section 2 — Latest Day Snapshot ───────────────────────────────────────
-    def snap(lbl, val, sub='', vc='#1A2C4E'):
-        return (f'<div class="snap"><div class="snap-lbl">{lbl}</div>'
-                f'<div class="snap-val" style="color:{vc}">{val}</div>'
-                f'<div class="snap-sub">{sub}</div></div>')
+    mtd = inject_meta(calc(mtd_ps), mo_onm_qhse, mo_key)
+    pm  = inject_meta(calc(pm_ps),  mo_onm_qhse, pm_key)
+    lat = calc(lat_ps)
+    prv = calc(prv_ps)
 
-    s2 = f"""<div style="font-size:10px;color:#5A7A96;margin-bottom:10px;font-family:monospace">
-  Data updated through <b>{latest.strftime('%d %b %Y')}</b>
-  &nbsp;&#8226;&nbsp; Showing {lat_lbl} vs {prv_lbl}
-</div>
-<div class="snap-grid">
-  {snap(f'Orders — {lat_lbl}', str(lat["n"]),
-    f'Prev day ({prv_lbl}): {prv["n"]} &nbsp; MTD total: {mtd["n"]:,}')}
-  {snap(f'kW — {lat_lbl}', f'{lat["kw"]:.1f}',
-    f'Prev day: {prv["kw"]:.1f} kW &nbsp; MTD: {mtd["kw"]:,.0f} kW')}
-  {snap(f'Rev/Wp — {lat_lbl}', f'&#8377;{lat["rev_wp"]:.2f}',
-    f'Prev day: &#8377;{prv["rev_wp"]:.2f} &nbsp; {pp(lat["rev_wp"]-prv["rev_wp"],decimals=2)}')}
-  {snap(f'AoS — {lat_lbl}', f'{lat["aos"]:.2f} kW',
-    f'Prev day: {prv["aos"]:.2f} kW &nbsp; {pp(lat["aos"]-prv["aos"],decimals=2)}')}
-  {snap(f'GM % — {lat_lbl}', f'{lat["gm"]:.1f}%',
-    f'Prev day: {prv["gm"]:.1f}% &nbsp; {pp(lat["gm"]-prv["gm"])}', gm_col(lat["gm"]))}
-  {snap(f'Adj GM % — {lat_lbl}', f'{lat["adj_gm"]:.1f}%',
-    f'Prev day: {prv["adj_gm"]:.1f}% &nbsp; {pp(lat["adj_gm"]-prv["adj_gm"])}',
-    gm_col(lat["adj_gm"]))}
-</div>"""
+    # ── Executive Summary
+    gm_trend  = mtd['gm'] - pm['gm']
+    trend_wd  = 'up' if gm_trend>=0.1 else ('down' if gm_trend<=-0.1 else 'flat')
+    bc  = by_cluster(mtd_ps); bcp = by_cluster(pm_ps)
+    concern = []
+    for key in bc:
+        c=calc(bc[key])
+        if c['n']>=5 and c['gm']<40: concern.append('{} ({:.1f}%)'.format(key[1],c['gm']))
+    cs = (', '.join(concern[:3])+' need margin attention.' if concern
+          else 'All clusters tracking above 40% GM threshold.')
+    summary = (
+        '<b>{:,} installations</b> ({:,.0f} kW) completed MTD in {} -- '
+        '{} vs {} on volume. '
+        'Overall GM is <b style="color:{}">{:.2f}%</b> '
+        '({} {:.2f}pp MoM), Adjusted GM <b>{:.2f}%</b>. '
+        'Rev/Wp at &#8377;{:.2f} vs &#8377;{:.2f} in {}. {}'
+    ).format(
+        mtd['n'],mtd['kw'],curr_lbl,
+        dpct(mtd['n'],pm['n']),prev_lbl,
+        gmc(mtd['gm']),mtd['gm'],
+        trend_wd,abs(gm_trend),mtd['adj_gm'],
+        mtd['rev_wp'],pm['rev_wp'],prev_lbl,cs
+    )
 
-    # ── Section 3 — Cluster Trend vs Own History ───────────────────────────────
-    mtd_by_cl = group_by_cluster(mtd_ps)
-    pm_by_cl  = group_by_cluster(pm_ps)
-    all_keys  = set(mtd_by_cl.keys())
+    # ── KPI Table (2 rows x 4 cols)
+    def kc(lbl,val,sub,vc='#1A2C4E'):
+        return ('<td class="kpi-c">'
+                '<span class="kpi-l">{}</span>'
+                '<span class="kpi-v" style="color:{}">{}</span>'
+                '<span class="kpi-d">{}</span>'
+                '</td>').format(lbl,vc,val,sub)
 
-    clusters = []
-    for key in all_keys:
-        curr = calc(mtd_by_cl.get(key, []))
-        prev = calc(pm_by_cl.get(key, []))
-        if curr['n'] < 3:
-            continue
-        state, cluster = key
-        gm_d   = curr['gm'] - prev['gm']
-        abs_d  = curr['abs_gm'] - prev['abs_gm']
-        abs_dp = (abs_d / prev['abs_gm'] * 100) if prev['abs_gm'] else 0
-        driver_label, driver_detail = driver_analysis(curr, prev, gm_d)
-        clusters.append(dict(
-            state=state, cluster=cluster,
-            curr=curr, prev=prev,
-            gm_d=gm_d, abs_d=abs_d, abs_dp=abs_dp,
-            driver_label=driver_label, driver_detail=driver_detail
-        ))
+    kpi_html = (
+        '<table class="kpi-t"><tr>'
+        + kc('Orders MTD', '{:,}'.format(mtd['n']),
+             '{} vs {:,} {} (1-{})'.format(dpct(mtd['n'],pm['n']),pm['n'],prev_lbl,pm_day))
+        + kc('kW MTD', '{:,.0f}'.format(mtd['kw']),
+             '{} vs {:,.0f} kW {}'.format(dpct(mtd['kw'],pm['kw']),pm['kw'],prev_lbl))
+        + kc('GM Inst % MTD', '{:.2f}%'.format(mtd['gm']),
+             '{} vs {:.2f}% {}'.format(dpp(mtd['gm']-pm['gm']),pm['gm'],prev_lbl), gmc(mtd['gm']))
+        + kc('Adjusted GM % MTD', '{:.2f}%'.format(mtd['adj_gm']),
+             '{} vs {:.2f}% {}'.format(dpp(mtd['adj_gm']-pm['adj_gm']),pm['adj_gm'],prev_lbl), gmc(mtd['adj_gm']))
+        + '</tr><tr>'
+        + kc('Avg Order Size', '{:.2f} kW'.format(mtd['aos']),
+             'vs {:.2f} kW {} &nbsp; {}'.format(pm['aos'],prev_lbl,dpval(mtd['aos']-pm['aos'],'kW')))
+        + kc('Avg Order Value', fc(mtd['aov']),
+             'vs {} {}'.format(fc(pm['aov']),prev_lbl))
+        + kc('Rev / Wp', '&#8377;{:.2f}'.format(mtd['rev_wp']),
+             'vs &#8377;{:.2f} {} &nbsp; {}'.format(pm['rev_wp'],prev_lbl,dpval(mtd['rev_wp']-pm['rev_wp'],'&#8377;/Wp')))
+        + kc('Revenue MTD', fc(mtd['rev']),
+             'vs {} {} &nbsp; {}'.format(fc(pm['rev']),prev_lbl,dpct(mtd['rev'],pm['rev'])))
+        + '</tr></table>'
+    )
 
-    # Sort: biggest declines first (alerts on top), then stable, then gains
-    clusters.sort(key=lambda x: x['gm_d'])
+    # ── Latest Day Snapshot (1 row x 6 cols)
+    def sc(lbl,val,sub,vc='#1A2C4E'):
+        return ('<td class="snap-c">'
+                '<span class="kpi-l">{}</span>'
+                '<span class="kpi-v" style="font-size:17px;color:{}">{}</span>'
+                '<span class="kpi-d">{}</span>'
+                '</td>').format(lbl,vc,val,sub)
 
-    # Split into buckets
-    declining  = [c for c in clusters if c['gm_d'] < -0.3]
-    stable_cl  = [c for c in clusters if -0.3 <= c['gm_d'] <= 0.3]
-    improving  = [c for c in clusters if c['gm_d'] > 0.3]
-    improving.sort(key=lambda x: -x['gm_d'])
+    snap_note = ('Data updated through <b style="color:#1A2C4E">{}</b> &nbsp;&bull;&nbsp; '
+                 'Showing <b>{}</b> vs <b>{}</b>').format(latest.strftime('%d %b %Y'),lat_lbl,prv_lbl)
+    snap_html = (
+        '<div style="font-size:9.5px;color:#5A7A96;font-family:monospace;margin-bottom:10px">'
+        +snap_note+'</div>'
+        '<table class="snap-t"><tr>'
+        + sc('Orders -- {}'.format(lat_lbl), str(lat['n']),
+             'Prev ({}): {} &nbsp;&bull;&nbsp; MTD: {:,}'.format(prv_lbl,prv['n'],mtd['n']))
+        + sc('kW -- {}'.format(lat_lbl), '{:.1f}'.format(lat['kw']),
+             'Prev: {:.1f} kW &nbsp;&bull;&nbsp; MTD: {:,.0f}'.format(prv['kw'],mtd['kw']))
+        + sc('Rev/Wp -- {}'.format(lat_lbl), '&#8377;{:.2f}'.format(lat['rev_wp']),
+             'Prev: &#8377;{:.2f} &nbsp; {}'.format(prv['rev_wp'],dpval(lat['rev_wp']-prv['rev_wp'],'&#8377;/Wp')))
+        + sc('AoS -- {}'.format(lat_lbl), '{:.2f} kW'.format(lat['aos']),
+             'Prev: {:.2f} kW &nbsp; {}'.format(prv['aos'],dpval(lat['aos']-prv['aos'],'kW')))
+        + sc('GM % -- {}'.format(lat_lbl), '{:.1f}%'.format(lat['gm']),
+             'Prev: {:.1f}% &nbsp; {}'.format(prv['gm'],dpp(lat['gm']-prv['gm'])), gmc(lat['gm']))
+        + sc('Adj GM % -- {}'.format(lat_lbl), '{:.1f}%'.format(lat['adj_gm']),
+             'Prev: {:.1f}% &nbsp; {}'.format(prv['adj_gm'],dpp(lat['adj_gm']-prv['adj_gm'])), gmc(lat['adj_gm']))
+        + '</tr></table>'
+    )
 
-    def render_cluster_card(c):
-        curr = c['curr']
-        prev = c['prev']
-        gm_d = c['gm_d']
-        css_cls = ('up' if gm_d > 0.3 else ('down' if gm_d < -0.3 else 'stable'))
-        state_disp = STATE_DISPLAY.get(c['state'], c['state'])
-
-        abs_gm_str = f"{fc(curr['abs_gm'])} vs {fc(prev['abs_gm'])}"
-        abs_chg    = pct_chg(curr['abs_gm'], prev['abs_gm'])
-
-        dd = c['driver_detail']
-        metric_pills = ''
-        if dd:
-            def pill(lbl, val, good):
-                clr = '#16A34A' if good else '#DC2626'
-                return (f'<span style="display:inline-block;background:#fff;border:1px solid #E2EAF4;'
-                        f'border-radius:5px;padding:2px 7px;margin-right:5px;font-size:9.5px;">'
-                        f'{lbl}: <b style="color:{clr}">{val}</b></span>')
-            if 'rev_wp_d' in dd and abs(dd['rev_wp_d']) >= 0.5:
-                g = dd['rev_wp_d'] > 0
-                metric_pills += pill('Rev/Wp', f'{"+" if g else ""}&#8377;{dd["rev_wp_d"]:.1f}', g)
-            if 'aos_d' in dd and abs(dd['aos_d']) >= 0.1:
-                g = dd['aos_d'] > 0
-                metric_pills += pill('AoS', f'{"+" if g else ""}{dd["aos_d"]:.2f}kW', g)
-            if 'cogs_kw_d' in dd and abs(dd['cogs_kw_d']) >= 500:
-                g = dd['cogs_kw_d'] < 0
-                metric_pills += pill('COGS/kW', f'{"+" if dd["cogs_kw_d"]>0 else ""}&#8377;{dd["cogs_kw_d"]/1000:.1f}K', g)
-
-        return f"""<div class="cluster-card {css_cls}">
-  <div class="cc-header">
-    <div>
-      <span class="cc-name">{c['cluster']}</span>
-      <span class="cc-state">{state_disp}</span>
-    </div>
-    <div style="display:flex;align-items:center;gap:8px">
-      {trend_badge(gm_d)}
-      <span style="font-size:11px;font-weight:700;color:{gm_col(curr['gm'])}">{curr['gm']:.1f}%</span>
-      <span style="font-size:10px;color:#94A3B8">GM</span>
-    </div>
-  </div>
-  <div class="cc-metrics">
-    <div class="cc-m">
-      <span class="cc-ml">Orders</span>
-      <span class="cc-mv">{curr['n']} <span style="color:#94A3B8;font-size:9px">vs {prev['n']}</span></span>
-    </div>
-    <div class="cc-m">
-      <span class="cc-ml">kW</span>
-      <span class="cc-mv">{curr['kw']:,.0f} <span style="color:#94A3B8;font-size:9px">vs {prev['kw']:,.0f}</span></span>
-    </div>
-    <div class="cc-m">
-      <span class="cc-ml">GM% vs {prev_lbl}</span>
-      <span class="cc-mv">{curr['gm']:.1f}% &rarr; {prev['gm']:.1f}%
-        &nbsp;{pp(gm_d)}</span>
-    </div>
-    <div class="cc-m">
-      <span class="cc-ml">Abs GM &mdash; MoM</span>
-      <span class="cc-mv">{abs_gm_str} &nbsp;{abs_chg}</span>
-    </div>
-    <div class="cc-m">
-      <span class="cc-ml">Rev/Wp</span>
-      <span class="cc-mv">&#8377;{curr['rev_wp']:.2f} <span style="color:#94A3B8;font-size:9px">vs &#8377;{prev['rev_wp']:.2f}</span></span>
-    </div>
-    <div class="cc-m">
-      <span class="cc-ml">AoS (kW)</span>
-      <span class="cc-mv">{curr['aos']:.2f} <span style="color:#94A3B8;font-size:9px">vs {prev['aos']:.2f}</span></span>
-    </div>
-  </div>
-  {f'<div style="margin-bottom:5px">{metric_pills}</div>' if metric_pills else ''}
-  <div class="cc-driver">&#128270; <b>Driver:</b> {c['driver_label']}</div>
-</div>"""
-
-    def section_group(title, items, color):
-        if not items: return ''
-        cards = ''.join(render_cluster_card(c) for c in items)
-        return (f'<div style="font-size:10px;font-weight:700;color:{color};'
-                f'text-transform:uppercase;letter-spacing:.8px;margin:10px 0 6px">'
-                f'{title}</div>'
-                f'<div class="cluster-grid">{cards}</div>')
-
-    s3 = (section_group(f'↓ Declining vs {prev_lbl} — Needs Attention', declining, '#DC2626') +
-          section_group(f'→ Stable Clusters (within ±0.3pp)', stable_cl, '#64748B') +
-          section_group(f'↑ Improving vs {prev_lbl}', improving, '#16A34A'))
-
-    if not s3:
-        s3 = '<p style="color:#94A3B8;font-size:11px">Insufficient data for cluster comparison.</p>'
-
-    # ── Section 4 — Actionable Insights ───────────────────────────────────────
-    insights = []
-
-    # Big movers
-    if improving:
-        top3 = improving[:3]
-        names = ', '.join(f'<b>{c["cluster"]}</b> (+{c["gm_d"]:.1f}pp)' for c in top3)
-        drivers = '; '.join(f'{c["cluster"]}: {c["driver_label"].split(";")[0]}' for c in top3)
-        insights.append(('&#128200; <b>Top GM gainers:</b> ' + names +
-                         f'<br><span style="color:#5A7A96">{drivers}</span>'))
-
-    if declining:
-        bot3 = declining[:3]
-        names = ', '.join(f'<b>{c["cluster"]}</b> ({c["gm_d"]:.1f}pp)' for c in bot3)
-        drivers = '; '.join(f'{c["cluster"]}: {c["driver_label"].split(";")[0]}' for c in bot3)
-        insights.append(('&#128201; <b>Clusters losing margin:</b> ' + names +
-                         f'<br><span style="color:#5A7A96">{drivers}</span>'))
-
-    # Pricing vs size analysis
-    pricing_up   = [c for c in clusters if c['driver_detail'].get('top_type') == 'pricing_up']
-    pricing_down = [c for c in clusters if c['driver_detail'].get('top_type') == 'pricing_down']
-    size_up      = [c for c in clusters if c['driver_detail'].get('top_type') == 'size_up']
-    size_down    = [c for c in clusters if c['driver_detail'].get('top_type') == 'size_down']
-
-    if pricing_up:
-        insights.append(f'&#128176; <b>Pricing improvement clusters</b> (Rev/Wp led): '
-                        + ', '.join(f'<b>{c["cluster"]}</b>' for c in pricing_up))
-    if size_up:
-        insights.append(f'&#128295; <b>System-size-led gainers</b> (AoS ↑): '
-                        + ', '.join(f'<b>{c["cluster"]}</b>' for c in size_up))
-    if pricing_down:
-        names = ', '.join(f'<b>{c["cluster"]}</b> (Rev/Wp ↓&#8377;{abs(c["driver_detail"]["rev_wp_d"]):.1f})' for c in pricing_down)
-        insights.append(f'&#9888;&#65039; <b>Pricing pressure detected:</b> {names} — check if discount policy changed')
-    if size_down:
-        names = ', '.join(f'<b>{c["cluster"]}</b> (AoS ↓{abs(c["driver_detail"]["aos_d"]):.2f}kW)' for c in size_down)
-        insights.append(f'&#128201; <b>Shrinking system sizes:</b> {names} — review sales team upsell strategy')
-
-    # Run-rate
-    if latest.day > 1:
-        pace      = mtd['n'] / latest.day
-        proj      = round(pace * 30)
-        insights.append(f'&#128202; <b>Month run-rate:</b> {pace:.1f} installs/day &rarr; '
-                        f'<b>~{proj:,} orders projected</b> for full month '
-                        f'(vs {pm["n"]:,} actual in {prev_lbl})')
-
-    # Abs GM standout
-    if clusters:
-        abs_gm_sorted = sorted(clusters, key=lambda x: x['abs_dp'], reverse=True)
-        best = abs_gm_sorted[0]
-        worst = abs_gm_sorted[-1]
-        insights.append(
-            f'&#128181; <b>Abs GM leaders:</b> '
-            f'Biggest gain — <b>{best["cluster"]}</b> ({fc(best["curr"]["abs_gm"])} vs {fc(best["prev"]["abs_gm"])}, {pct_chg(best["curr"]["abs_gm"],best["prev"]["abs_gm"])}); '
-            f'Biggest drop — <b>{worst["cluster"]}</b> ({fc(worst["curr"]["abs_gm"])} vs {fc(worst["prev"]["abs_gm"])}, {pct_chg(worst["curr"]["abs_gm"],worst["prev"]["abs_gm"])})'
-        )
-
-    s4 = ''.join(f'<div class="insight-block">{i}</div>' for i in insights) \
-         or '<div class="insight-block">&#9989; All clusters within expected range.</div>'
-
-    # ── Section 5 — COGS Breakdown ─────────────────────────────────────────────
+    # ── COGS
     cogs_total = mtd['cogs']
-    cogs_items = [
-        ('Module',   mtd['mod']),
-        ('Inverter', mtd['inv']),
-        ('MMS',      mtd['mms']),
-        ('Cables',   mtd['cab']),
-        ('Metering', mtd['mtr']),
-        ('I&C',      mtd['ic']),
-        ('Other',    mtd['oth']),
-    ]
-    pm_cogs = {'Module':pm['mod'],'Inverter':pm['inv'],'MMS':pm['mms'],
-               'Cables':pm['cab'],'Metering':pm['mtr'],'I&C':pm['ic'],'Other':pm['oth']}
+    cogs_items = [('Module',mtd['mod']),('Inverter',mtd['inv']),('MMS',mtd['mms']),
+                  ('Cables',mtd['cab']),('Metering',mtd['mtr']),('I&C',mtd['ic']),('Other',mtd['oth'])]
+    pm_cogs    = {'Module':pm['mod'],'Inverter':pm['inv'],'MMS':pm['mms'],
+                  'Cables':pm['cab'],'Metering':pm['mtr'],'I&C':pm['ic'],'Other':pm['oth']}
+    bars = ''; cg_rows = ''
+    for lbl,val in cogs_items:
+        pct = val/cogs_total*100 if cogs_total else 0
+        if pct<0.3: continue
+        col = COGS_COLORS.get(lbl,'#94A3B8')
+        bars += '<div class="cb" style="width:{:.1f}%;background:{}" title="{}: {:.1f}%">{}</div>'.format(
+            pct,col,lbl,pct,lbl if pct>6 else '')
+        pmv=pm_cogs.get(lbl,0); pmpct=pmv/pm['cogs']*100 if pm['cogs'] else 0
+        rpct=val/mtd['rev']*100 if mtd['rev'] else 0
+        cg_rows += ('<tr>'
+            '<td><span style="display:inline-block;width:9px;height:9px;background:{};'
+            'border-radius:2px;margin-right:5px;vertical-align:middle"></span>{}</td>'
+            '<td class="R">{}</td><td class="R">{:.1f}%</td>'
+            '<td class="R">{:.1f}%</td>'
+            '<td class="R">{} vs {:.1f}% {}</td>'
+            '</tr>').format(col,lbl,fc(val),pct,rpct,dpp(pct-pmpct,hb=False),pmpct,prev_lbl)
+    cogs_html = ('<div class="cbar">{}</div>'
+        '<table class="cg-t"><thead><tr><th>Category</th>'
+        '<th class="R">Amount MTD</th><th class="R">% of COGS</th>'
+        '<th class="R">% of Rev</th><th class="R">MoM Shift</th></tr></thead>'
+        '<tbody>{}</tbody></table>').format(bars,cg_rows)
 
-    bars = ''
-    cogs_rows = ''
-    for label, val in cogs_items:
-        pct_of_cogs = val / cogs_total * 100 if cogs_total else 0
-        if pct_of_cogs < 0.3:
-            continue
-        color = COGS_COLORS.get(label, '#94A3B8')
-        bars += (f'<div class="cb" style="width:{pct_of_cogs:.1f}%;background:{color}"'
-                 f' title="{label}: {pct_of_cogs:.1f}%">'
-                 f'{label if pct_of_cogs > 5 else ""}</div>')
+    # ── Cluster Trend Table
+    mtd_cl=by_cluster(mtd_ps); pm_cl=by_cluster(pm_ps)
+    declining=[]; stable_cl=[]; improving=[]; nascent=[]
+    for key in mtd_cl:
+        curr=calc(mtd_cl[key]); prev=calc(pm_cl.get(key,[]))
+        if curr['n']<5: continue
+        state,cluster=key
+        gm_d=curr['gm']-prev['gm']
+        ag_dp=(curr['abs_gm']-prev['abs_gm'])/prev['abs_gm']*100 if prev['abs_gm'] else 0
+        drv_tag,drv_det,_ = get_driver(curr,prev)
+        row=dict(state=state,cluster=cluster,curr=curr,prev=prev,
+                 gm_d=gm_d,ag_dp=ag_dp,drv_tag=drv_tag,drv_det=drv_det)
+        if prev['n']<MIN_ORDERS:  nascent.append(row)
+        elif gm_d<-0.3:           declining.append(row)
+        elif gm_d>0.3:            improving.append(row)
+        else:                     stable_cl.append(row)
+    declining.sort(key=lambda x:x['gm_d'])
+    improving.sort(key=lambda x:-x['gm_d'])
+    stable_cl.sort(key=lambda x:-x['curr']['gm'])
 
-        pm_val      = pm_cogs.get(label, 0)
-        pm_pct      = pm_val / pm['cogs'] * 100 if pm['cogs'] else 0
-        rev_pct     = val / mtd['rev'] * 100 if mtd['rev'] else 0
-        delta_pp_v  = pct_of_cogs - pm_pct
-
-        cogs_rows += (
-            f'<tr>'
-            f'<td><span style="display:inline-block;width:10px;height:10px;background:{color};'
-            f'border-radius:2px;margin-right:6px;vertical-align:middle"></span>{label}</td>'
-            f'<td class="r">{fc(val)}</td>'
-            f'<td class="r">{pct_of_cogs:.1f}%</td>'
-            f'<td class="r">{rev_pct:.1f}%</td>'
-            f'<td class="r">{pp(delta_pp_v, higher_better=False)} vs {pm_pct:.1f}% {prev_lbl}</td>'
-            f'</tr>'
+    def cl_row(r, bg=''):
+        c=r['curr']; p=r['prev']
+        sd=STATE_DISPLAY.get(r['state'],r['state'])
+        bgs='background:{};'.format(bg) if bg else ''
+        return ('<tr style="{}">'
+            '<td class="L" style="font-weight:700">{}</td>'
+            '<td class="L" style="color:#94A3B8;font-size:9.5px">{}</td>'
+            '<td>{} <span style="color:#CBD5E1;font-size:9px">/{}</span></td>'
+            '<td>{:,.0f} <span style="color:#CBD5E1;font-size:9px">/{:,.0f}</span></td>'
+            '<td>&#8377;{:.1f} <span style="color:#CBD5E1;font-size:9px">/&#8377;{:.1f}</span></td>'
+            '<td>{:.2f} <span style="color:#CBD5E1;font-size:9px">/{:.2f}</span></td>'
+            '{}'
+            '<td style="font-weight:700;text-align:center">{}</td>'
+            '<td style="text-align:center">{}<br><span style="color:#94A3B8;font-size:9px">{}</span></td>'
+            '<td style="text-align:center">{}</td>'
+            '<td class="L" style="color:#374151;font-size:9.5px;max-width:150px;'
+            'white-space:normal;min-width:90px">{}</td>'
+            '</tr>').format(
+            bgs,r['cluster'],sd,
+            c['n'],p['n'],c['kw'],p['kw'],
+            c['rev_wp'],p['rev_wp'],c['aos'],p['aos'],
+            gmcell(c['gm']),
+            dpp(r['gm_d']),
+            fc(c['abs_gm']),fc(p['abs_gm']),
+            dpct(c['abs_gm'],p['abs_gm']),
+            r['drv_tag']
         )
 
-    s5 = f"""<div class="cbar">{bars}</div>
-<table class="cogs">
-  <thead><tr>
-    <th>Category</th><th style="text-align:right">Amount MTD</th>
-    <th style="text-align:right">% of COGS</th>
-    <th style="text-align:right">% of Revenue</th>
-    <th style="text-align:right">MoM shift</th>
-  </tr></thead>
-  <tbody>{cogs_rows}</tbody>
-</table>"""
+    def grp(label,color):
+        return ('<tr class="grp"><td colspan="11" style="color:{};'
+                'border-left:3px solid {};padding-left:9px">{}</td></tr>').format(color,color,label)
 
-    # ── Assemble ──────────────────────────────────────────────────────────────
-    now_str = datetime.now().strftime('%d %b %Y, %I:%M %p')
-    html = f"""<!DOCTYPE html>
+    thead = ('<thead><tr>'
+        '<th class="L">Cluster</th><th class="L">State</th>'
+        '<th>Orders<br><span style="opacity:.6;font-weight:400">MTD / {}</span></th>'
+        '<th>kW<br><span style="opacity:.6;font-weight:400">MTD / {}</span></th>'
+        '<th>Rev/Wp<br><span style="opacity:.6;font-weight:400">MTD / {}</span></th>'
+        '<th>AoS<br><span style="opacity:.6;font-weight:400">MTD / {}</span></th>'
+        '<th>GM%</th><th>&#916;pp MoM</th>'
+        '<th>Abs GM<br><span style="opacity:.6;font-weight:400">MTD / {}</span></th>'
+        '<th>Abs&#916;%</th><th class="L">Driver</th>'
+        '</tr></thead>').format(prev_lbl,prev_lbl,prev_lbl,prev_lbl,prev_lbl)
+
+    tbody=''
+    if declining: tbody+=grp('&#8595; Declining vs {} -- needs attention'.format(prev_lbl),'#DC2626')+''.join(cl_row(r,'#FFF9F9') for r in declining)
+    if improving: tbody+=grp('&#8593; Improving vs {}'.format(prev_lbl),'#16A34A')+''.join(cl_row(r,'#F9FFFE') for r in improving)
+    if stable_cl: tbody+=grp('&#8594; Stable (within +/-0.3pp)','#64748B')+''.join(cl_row(r) for r in stable_cl)
+    if nascent:   tbody+=grp('New / growing clusters (thin prior data)','#7C3AED')+''.join(cl_row(r,'#FAF5FF') for r in nascent)
+    cl_html='<div style="overflow-x:auto"><table class="cl-t">{}<tbody>{}</tbody></table></div>'.format(thead,tbody)
+
+    # ── Actionable Insights
+    all_cl = declining+stable_cl+improving
+
+    insights=[]
+
+    price_dn=[(r['cluster'],r['drv_det'].get('rev_wp_d',0))
+              for r in all_cl if r['drv_det'].get('rev_wp_d',0)<-1.2 and r['curr']['n']>=MIN_ORDERS]
+    price_dn.sort(key=lambda x:x[1])
+    if price_dn:
+        names=', '.join('<b>{}</b> (&#8595;&#8377;{:.1f}/Wp)'.format(c,abs(d)) for c,d in price_dn[:5])
+        insights.append(('ins-r',
+            '&#9888; <b>Pricing erosion in {} cluster(s):</b> {}. '
+            'Rev/Wp fell below prior month -- review if discount approvals '
+            'or cohort pricing changed in these markets.'.format(len(price_dn),names)))
+
+    size_dn=[(r['cluster'],r['drv_det'].get('aos_d',0))
+             for r in all_cl if r['drv_det'].get('aos_d',0)<-0.25 and r['curr']['n']>=MIN_ORDERS]
+    if size_dn:
+        names=', '.join('<b>{}</b> (AoS {:.2f}kW)'.format(c,d) for c,d in size_dn[:4])
+        insights.append(('ins-a',
+            '&#128201; <b>Shrinking system sizes:</b> {}. '
+            'Smaller orders reduce per-kW margin leverage -- '
+            'check if upsell conversations are happening at point of sale.'.format(names)))
+
+    size_up_flat=[(r['cluster'],r['drv_det'].get('aos_d',0))
+                  for r in all_cl
+                  if r['drv_det'].get('aos_d',0)>0.25
+                  and abs(r['drv_det'].get('rev_wp_d',0))<1.0
+                  and r['curr']['n']>=MIN_ORDERS]
+    if size_up_flat:
+        names=', '.join('<b>{}</b> (+{:.2f}kW)'.format(c,d) for c,d in size_up_flat[:3])
+        insights.append(('ins-a',
+            '&#128295; <b>Bigger systems, pricing not moving:</b> {}. '
+            'AoS grew but Rev/Wp is flat -- larger installs should command a premium. '
+            'Opportunity to test price increase.'.format(names)))
+
+    price_up=[(r['cluster'],r['drv_det'].get('rev_wp_d',0))
+              for r in improving if r['drv_det'].get('rev_wp_d',0)>1.2 and r['curr']['n']>=MIN_ORDERS]
+    if price_up:
+        names=', '.join('<b>{}</b> (+&#8377;{:.1f}/Wp)'.format(c,d) for c,d in price_up[:3])
+        insights.append(('ins-g',
+            '&#128176; <b>Pricing discipline working:</b> {}. '
+            'Rev/Wp rising with volume holding -- identify what changed and replicate.'.format(names)))
+
+    cogs_up=[(lbl,val/cogs_total*100-pm_cogs.get(lbl,0)/pm['cogs']*100)
+             for lbl,val in cogs_items
+             if cogs_total and pm['cogs'] and val/cogs_total*100-pm_cogs.get(lbl,0)/pm['cogs']*100>0.3]
+    if cogs_up:
+        cw=', '.join('<b>{}</b> (+{:.2f}pp)'.format(l,d) for l,d in cogs_up)
+        insights.append(('ins-a',
+            '&#129521; <b>COGS mix shift:</b> {} share rising MoM. '
+            'Investigate if it is product mix or vendor rate changes -- '
+            'each +1pp in COGS share = direct GM compression.'.format(cw)))
+
+    if latest.day>1:
+        pace=mtd['n']/latest.day; proj=round(pace*30)
+        mo_gm_proj=fc(mtd['abs_gm']/latest.day*30)
+        insights.append(('ins-b',
+            '&#128202; <b>Month run-rate:</b> {:.1f} installs/day &rarr; '
+            '<b>~{:,} orders projected</b> for the full month '
+            '(vs {:,} actual in {}). At current GM, implies {} gross margin for the month.'.format(
+            pace,proj,pm['n'],prev_lbl,mo_gm_proj)))
+
+    if not insights:
+        insights=[('ins-g','&#9989; All clusters within expected range. No anomalies detected.')]
+
+    ins_html=''.join('<div class="ins {}">{}</div>'.format(t,m) for t,m in insights)
+
+    # ── Assemble
+    now_str=datetime.now().strftime('%d %b %Y, %I:%M %p')
+    html="""<!DOCTYPE html>
 <html><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<style>{CSS}</style></head>
+<style>"""+CSS+"""</style></head>
 <body><div class="wrap">
-
 <div class="hdr">
-  <div class="hdr-title">&#9728;&#65039; Solar Square &mdash; Daily GM Report</div>
-  <div class="hdr-sub">
-    HOTO Month: {latest.strftime('%b-%y')}
-    &nbsp;&#8226;&nbsp; Data through {latest.strftime('%d %B %Y')}
-    &nbsp;&#8226;&nbsp; Generated {now_str}
-  </div>
+  <div class="hdr-t">&#9728;&#65039; Solar Square -- Daily GM Report</div>
+  <div class="hdr-s">HOTO Month: """+latest.strftime('%b-%y')+""" &nbsp;&bull;&nbsp; Data through """+latest.strftime('%d %b %Y')+""" &nbsp;&bull;&nbsp; """+now_str+"""</div>
 </div>
-
-<div class="sec">
-  <div class="sec-title">&#128202; MTD at a Glance &mdash; {curr_lbl} vs {prev_lbl} (same {pm_day} days)</div>
-  {s1}
-</div>
-
-<div class="sec">
-  <div class="sec-title">&#128197; Latest Day Snapshot &mdash; {lat_lbl} vs {prv_lbl}</div>
-  {s2}
-</div>
-
-<div class="sec">
-  <div class="sec-title">&#128270; Cluster Trend &mdash; Each Cluster vs Its Own {prev_lbl} MTD</div>
-  {s3}
-</div>
-
-<div class="sec">
-  <div class="sec-title">&#9889; Actionable Insights</div>
-  {s4}
-</div>
-
-<div class="sec">
-  <div class="sec-title">&#129521; COGS Breakdown &mdash; MTD {curr_lbl}</div>
-  {s5}
-</div>
-
-<div class="ftr">
-  Solar Square B2C GM Dashboard &nbsp;&#8226;&nbsp;
-  Auto-generated from <code>projects.json.gz</code> &nbsp;&#8226;&nbsp;
-  Data: DN dump &rarr; GitHub Actions &rarr; {latest.strftime('%d %b %Y')}
-</div>
-
+<div class="sec"><div class="sec-t">Executive Summary</div><div class="summ">"""+summary+"""</div></div>
+<div class="sec"><div class="sec-t">MTD at a Glance -- """+curr_lbl+""" vs """+prev_lbl+""" (same """+str(pm_day)+""" days)</div>"""+kpi_html+"""</div>
+<div class="sec"><div class="sec-t">Latest Day -- """+lat_lbl+""" vs """+prv_lbl+"""</div>"""+snap_html+"""</div>
+<div class="sec"><div class="sec-t">COGS Breakdown -- MTD """+curr_lbl+"""</div>"""+cogs_html+"""</div>
+<div class="sec"><div class="sec-t">Actionable Insights</div>"""+ins_html+"""</div>
+<div class="ftr">Solar Square B2C GM &nbsp;&bull;&nbsp; Auto-generated from projects.json.gz &nbsp;&bull;&nbsp; """+latest.strftime('%d %b %Y')+"""</div>
 </div></body></html>"""
     return html, mtd, latest
 
-# ── Send ──────────────────────────────────────────────────────────────────────
-if __name__ == '__main__':
-    data = load_data()
-    html, mtd, latest = build_html(data)
-
-    subject = (f"Solar Square GM | {latest.strftime('%d %b %Y')} | "
-               f"MTD {mtd['n']:,} installs | GM {mtd['gm']:.2f}% | Adj {mtd['adj_gm']:.2f}%")
-
+if __name__=='__main__':
+    data=load_data()
+    html,mtd,latest=build(data)
+    subject=('Solar Square GM | {} | MTD {:,} installs | GM {:.2f}% | Adj {:.2f}%'.format(
+        latest.strftime('%d %b %Y'),mtd['n'],mtd['gm'],mtd['adj_gm']))
     if not GMAIL_PASS:
-        preview = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'report_preview.html')
-        with open(preview, 'w', encoding='utf-8') as f:
-            f.write(html)
-        print(f"ℹ  No GMAIL_PASSWORD — preview saved: {preview}", flush=True)
-        print(f"   Subject: {subject}", flush=True)
+        out=os.path.join(os.path.dirname(os.path.abspath(__file__)),'report_preview.html')
+        open(out,'w',encoding='utf-8').write(html)
+        print('Preview saved: '+out,flush=True)
+        print('Subject: '+subject,flush=True)
         sys.exit(0)
-
-    msg = MIMEMultipart('alternative')
-    msg['Subject'] = subject
-    msg['From']    = SENDER
-    msg['To']      = ", ".join(RECIPIENTS)
-    msg.attach(MIMEText(html, 'html', 'utf-8'))
-
-    print(f"Sending to {RECIPIENTS}...", flush=True)
-    with smtplib.SMTP('smtp.gmail.com', 587) as s:
-        s.ehlo(); s.starttls()
-        s.login(SENDER, GMAIL_PASS)
-        s.sendmail(SENDER, RECIPIENTS, msg.as_string())
-    print(f"✅ Sent — {subject}", flush=True)
+    msg=MIMEMultipart('alternative')
+    msg['Subject']=subject; msg['From']=SENDER; msg['To']=', '.join(RECIPIENTS)
+    msg.attach(MIMEText(html,'html','utf-8'))
+    print('Sending...',flush=True)
+    with smtplib.SMTP('smtp.gmail.com',587) as s:
+        s.ehlo(); s.starttls(); s.login(SENDER,GMAIL_PASS)
+        s.sendmail(SENDER,RECIPIENTS,msg.as_string())
+    print('Sent: '+subject,flush=True)
