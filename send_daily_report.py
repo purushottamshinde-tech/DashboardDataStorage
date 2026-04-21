@@ -212,15 +212,70 @@ def build(data):
         '<b>{:,} installations</b> ({:,.0f} kW) completed MTD in {} -- '
         '{} vs {} on volume. '
         'Overall GM is <b style="color:{}">{:.2f}%</b> '
-        '({} {:.2f}pp MoM), Adjusted GM <b>{:.2f}%</b>. '
+        '({} {:.2f}pp MoM). '
         'Rev/Wp at &#8377;{:.2f} vs &#8377;{:.2f} in {}. {}'
     ).format(
         mtd['n'],mtd['kw'],curr_lbl,
         dpct(mtd['n'],pm['n']),prev_lbl,
         gmc(mtd['gm']),mtd['gm'],
-        trend_wd,abs(gm_trend),mtd['adj_gm'],
+        trend_wd,abs(gm_trend),
         mtd['rev_wp'],pm['rev_wp'],prev_lbl,cs
     )
+
+    # ── Cluster summary mini-table (for Executive Summary)
+    cl_summ_rows = ''
+    all_cl_keys = sorted(
+        set(list(bc.keys())+list(bcp.keys())),
+        key=lambda k: k[1]
+    )
+    summ_rows = []
+    for key in all_cl_keys:
+        c = calc(bc.get(key,[]))
+        p = calc(bcp.get(key,[]))
+        if c['n'] < 5: continue
+        gd = c['gm'] - p['gm']
+        rwp_d = c['rev_wp'] - p['rev_wp']
+        summ_rows.append((gd, key[1], key[0], c, p, gd, rwp_d))
+    summ_rows.sort(key=lambda x: x[0])  # worst first
+    for _,cluster,state,c,p,gd,rwp_d in summ_rows:
+        sd = STATE_DISPLAY.get(state, state)
+        gd_html = dpp(gd)
+        rwp_html = ('<span style="color:#DC2626;font-weight:600">&#8595;&#8377;{:.1f}</span>'.format(abs(rwp_d))
+                    if rwp_d < -0.5 else
+                    ('<span style="color:#16A34A;font-weight:600">&#8593;&#8377;{:.1f}</span>'.format(rwp_d)
+                     if rwp_d > 0.5 else
+                     '<span style="color:#94A3B8">~</span>'))
+        row_bg = '#FFF5F5' if gd < -0.3 else ('#F0FDF4' if gd > 0.3 else '')
+        cl_summ_rows += (
+            '<tr style="background:{}">'
+            '<td style="font-weight:600;padding:5px 9px;white-space:nowrap">{}</td>'
+            '<td style="color:#94A3B8;font-size:9px;padding:5px 6px">{}</td>'
+            '<td style="text-align:center;padding:5px 9px">{} <span style="color:#CBD5E1;font-size:9px">/{}</span></td>'
+            '<td style="text-align:center;padding:5px 9px;font-weight:600;color:{}">{:.1f}%</td>'
+            '<td style="text-align:center;padding:5px 9px">{}</td>'
+            '<td style="text-align:center;padding:5px 9px">&#8377;{:.2f} <span style="color:#CBD5E1;font-size:9px">/&#8377;{:.2f}</span> {}</td>'
+            '</tr>'
+        ).format(
+            row_bg, cluster, sd,
+            c['n'], p['n'],
+            gmc(c['gm']), c['gm'],
+            gd_html,
+            c['rev_wp'], p['rev_wp'], rwp_html
+        )
+    cl_summ_html = (
+        '<div style="overflow-x:auto;margin-top:10px">'
+        '<table style="width:100%;border-collapse:collapse;font-size:10.5px">'
+        '<thead><tr style="background:#1A2C4E;color:#fff">'
+        '<th style="padding:5px 9px;text-align:left;font-size:7.5px;letter-spacing:.5px;font-weight:600;text-transform:uppercase">Cluster</th>'
+        '<th style="padding:5px 6px;text-align:left;font-size:7.5px;letter-spacing:.5px;font-weight:600;text-transform:uppercase">State</th>'
+        '<th style="padding:5px 9px;text-align:center;font-size:7.5px;letter-spacing:.5px;font-weight:600;text-transform:uppercase">Orders<br><span style="opacity:.6;font-weight:400">MTD / {}</span></th>'
+        '<th style="padding:5px 9px;text-align:center;font-size:7.5px;letter-spacing:.5px;font-weight:600;text-transform:uppercase">GM% MTD</th>'
+        '<th style="padding:5px 9px;text-align:center;font-size:7.5px;letter-spacing:.5px;font-weight:600;text-transform:uppercase">&Delta;pp MoM</th>'
+        '<th style="padding:5px 9px;text-align:center;font-size:7.5px;letter-spacing:.5px;font-weight:600;text-transform:uppercase">Rev/Wp MTD / {} &nbsp; Trend</th>'
+        '</tr></thead>'
+        '<tbody>{}</tbody>'
+        '</table></div>'
+    ).format(prev_lbl, prev_lbl, cl_summ_rows)
 
     # ── KPI Table (2 rows x 4 cols)
     def kc(lbl,val,sub,vc='#1A2C4E'):
@@ -276,8 +331,6 @@ def build(data):
              'Prev: {:.2f} kW &nbsp; {}'.format(prv['aos'],dpval(lat['aos']-prv['aos'],'kW')))
         + sc('GM % -- {}'.format(lat_lbl), '{:.1f}%'.format(lat['gm']),
              'Prev: {:.1f}% &nbsp; {}'.format(prv['gm'],dpp(lat['gm']-prv['gm'])), gmc(lat['gm']))
-        + sc('Adj GM % -- {}'.format(lat_lbl), '{:.1f}%'.format(lat['adj_gm']),
-             'Prev: {:.1f}% &nbsp; {}'.format(prv['adj_gm'],dpp(lat['adj_gm']-prv['adj_gm'])), gmc(lat['adj_gm']))
         + '</tr></table>'
     )
 
@@ -394,27 +447,6 @@ def build(data):
             'Rev/Wp fell below prior month -- review if discount approvals '
             'or cohort pricing changed in these markets.'.format(len(price_dn),names)))
 
-    size_dn=[(r['cluster'],r['drv_det'].get('aos_d',0))
-             for r in all_cl if r['drv_det'].get('aos_d',0)<-0.25 and r['curr']['n']>=MIN_ORDERS]
-    if size_dn:
-        names=', '.join('<b>{}</b> (AoS {:.2f}kW)'.format(c,d) for c,d in size_dn[:4])
-        insights.append(('ins-a',
-            '&#128201; <b>Shrinking system sizes:</b> {}. '
-            'Smaller orders reduce per-kW margin leverage -- '
-            'check if upsell conversations are happening at point of sale.'.format(names)))
-
-    size_up_flat=[(r['cluster'],r['drv_det'].get('aos_d',0))
-                  for r in all_cl
-                  if r['drv_det'].get('aos_d',0)>0.25
-                  and abs(r['drv_det'].get('rev_wp_d',0))<1.0
-                  and r['curr']['n']>=MIN_ORDERS]
-    if size_up_flat:
-        names=', '.join('<b>{}</b> (+{:.2f}kW)'.format(c,d) for c,d in size_up_flat[:3])
-        insights.append(('ins-a',
-            '&#128295; <b>Bigger systems, pricing not moving:</b> {}. '
-            'AoS grew but Rev/Wp is flat -- larger installs should command a premium. '
-            'Opportunity to test price increase.'.format(names)))
-
     price_up=[(r['cluster'],r['drv_det'].get('rev_wp_d',0))
               for r in improving if r['drv_det'].get('rev_wp_d',0)>1.2 and r['curr']['n']>=MIN_ORDERS]
     if price_up:
@@ -423,15 +455,31 @@ def build(data):
             '&#128176; <b>Pricing discipline working:</b> {}. '
             'Rev/Wp rising with volume holding -- identify what changed and replicate.'.format(names)))
 
-    cogs_up=[(lbl,val/cogs_total*100-pm_cogs.get(lbl,0)/pm['cogs']*100)
+    # COGS insight -- data-driven root cause
+    cogs_up=[(lbl,val/cogs_total*100-pm_cogs.get(lbl,0)/pm['cogs']*100,
+              val/mtd['kw'] if mtd['kw'] else 0,
+              pm_cogs.get(lbl,0)/pm['kw'] if pm['kw'] else 0)
              for lbl,val in cogs_items
              if cogs_total and pm['cogs'] and val/cogs_total*100-pm_cogs.get(lbl,0)/pm['cogs']*100>0.3]
     if cogs_up:
-        cw=', '.join('<b>{}</b> (+{:.2f}pp)'.format(l,d) for l,d in cogs_up)
+        aos_d = mtd['aos'] - pm['aos']
+        cogs_lines = []
+        for lbl,pp_d,pkw_c,pkw_p in cogs_up:
+            pkw_d = pkw_c - pkw_p
+            if lbl in ('MMS','Cables'):
+                if aos_d > 0.05:
+                    reason = ('AoS up {:.2f}kW -- larger installs need more structural runs per kW'
+                              .format(aos_d))
+                else:
+                    reason = 'per-kW rate up &#8377;{:.0f}/kW -- check vendor pricing'.format(pkw_d)
+            else:
+                reason = 'per-kW rate shift of &#8377;{:.0f}/kW'.format(pkw_d)
+            cogs_lines.append(
+                '<b>{}</b> +{:.2f}pp (&#8377;{:.0f}/kW curr vs &#8377;{:.0f}/kW prev -- {})'.format(
+                    lbl, pp_d, pkw_c, pkw_p, reason))
         insights.append(('ins-a',
-            '&#129521; <b>COGS mix shift:</b> {} share rising MoM. '
-            'Investigate if it is product mix or vendor rate changes -- '
-            'each +1pp in COGS share = direct GM compression.'.format(cw)))
+            '&#129521; <b>COGS mix shift:</b> {}. '
+            'Each +1pp in COGS share = direct GM compression.'.format('; '.join(cogs_lines))))
 
     if latest.day>1:
         pace=mtd['n']/latest.day; proj=round(pace*30)
@@ -470,8 +518,8 @@ def build(data):
 if __name__=='__main__':
     data=load_data()
     html,mtd,latest=build(data)
-    subject=('Solar Square GM | {} | MTD {:,} installs | GM {:.2f}% | Adj {:.2f}%'.format(
-        latest.strftime('%d %b %Y'),mtd['n'],mtd['gm'],mtd['adj_gm']))
+    subject=('Solar Square GM | {} | MTD {:,} installs | GM {:.2f}%'.format(
+        latest.strftime('%d %b %Y'),mtd['n'],mtd['gm']))
     if not GMAIL_PASS:
         out=os.path.join(os.path.dirname(os.path.abspath(__file__)),'report_preview.html')
         open(out,'w',encoding='utf-8').write(html)
