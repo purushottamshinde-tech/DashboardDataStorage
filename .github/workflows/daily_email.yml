@@ -1,12 +1,12 @@
 name: Daily GM Report Email
 
 on:
-  # Manual trigger — use this for the trial run
+  # Manual trigger — keep for ad-hoc runs
   workflow_dispatch:
 
-  # Daily at 8:30 AM IST (03:00 UTC)
+  # Daily at 8:30 AM IST = 03:00 UTC
   schedule:
-    - cron: '0 3 * * *'
+    - cron: '0 3 * * 1-6'   # Mon–Sat; change to * for all 7 days
 
   # Also fire automatically after the data sync workflow completes
   workflow_run:
