@@ -202,24 +202,18 @@ def build(data):
     gm_trend  = mtd['gm'] - pm['gm']
     trend_wd  = 'up' if gm_trend>=0.1 else ('down' if gm_trend<=-0.1 else 'flat')
     bc  = by_cluster(mtd_ps); bcp = by_cluster(pm_ps)
-    concern = []
-    for key in bc:
-        c=calc(bc[key])
-        if c['n']>=5 and c['gm']<40: concern.append('{} ({:.1f}%)'.format(key[1],c['gm']))
-    cs = (', '.join(concern[:3])+' need margin attention.' if concern
-          else 'All clusters tracking above 40% GM threshold.')
     summary = (
         '<b>{:,} installations</b> ({:,.0f} kW) completed MTD in {} -- '
         '{} vs {} on volume. '
         'Overall GM is <b style="color:{}">{:.2f}%</b> '
         '({} {:.2f}pp MoM). '
-        'Rev/Wp at &#8377;{:.2f} vs &#8377;{:.2f} in {}. {}'
+        'Rev/Wp at &#8377;{:.2f} vs &#8377;{:.2f} in {}.'
     ).format(
         mtd['n'],mtd['kw'],curr_lbl,
         dpct(mtd['n'],pm['n']),prev_lbl,
         gmc(mtd['gm']),mtd['gm'],
         trend_wd,abs(gm_trend),
-        mtd['rev_wp'],pm['rev_wp'],prev_lbl,cs
+        mtd['rev_wp'],pm['rev_wp'],prev_lbl
     )
 
     # ── Cluster summary mini-table (for Executive Summary)
