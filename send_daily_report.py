@@ -514,13 +514,11 @@ def build(data):
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     #  COGS SECTION
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    bars_html = ''; cg_rows = ''
+    cg_rows = ''
     for lbl,val in cogs_items:
         pct = val/cogs_total*100 if cogs_total else 0
         if pct < 0.3: continue
         col = COGS_COLORS.get(lbl, '#94A3B8')
-        bars_html += ('<div class="cb" style="width:{:.1f}%;background:{}" title="{}: {:.1f}%">{}</div>').format(
-            pct, col, lbl, pct, lbl if pct>7 else (''))
         pmv   = pm_cogs.get(lbl, 0)
         pmpct = pmv/pm['cogs']*100 if pm['cogs'] else 0
         rpct  = val/mtd['rev']*100 if mtd['rev'] else 0
@@ -595,7 +593,6 @@ def build(data):
         '<div style="margin-bottom:6px;font-size:9.5px;color:#6B7280">'
         'Total COGS/Wp: <b style="color:#111827">&#8377;{:.2f}</b> vs '
         '&#8377;{:.2f} {} &nbsp; {}</div>'
-        '<div class="cbar">{}</div>'
         '<table class="cg"><thead><tr>'
         '<th>Category</th><th class="R">MTD Amount</th>'
         '<th class="R">% of COGS</th><th class="R">Cost / Wp</th>'
@@ -604,7 +601,7 @@ def build(data):
     ).format(
         total_cogs_pkw_c/1000, total_cogs_pkw_p/1000, prev_lbl,
         dpval((total_cogs_pkw_c-total_cogs_pkw_p)/1000, '&#8377;/Wp', hb=False),
-        bars_html, cg_rows, cogs_callout
+        cg_rows, cogs_callout
     )
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -704,18 +701,13 @@ def build(data):
         return (
             '<tr style="{}">'
             '<td style="font-weight:700;color:#111827">{}</td>'
-            '<td style="color:#9CA3AF;font-size:9px">{}</td>'
-            '<td class="R">{} <span style="color:#D1D5DB;font-size:9px">/{}</span></td>'
-            '<td class="R">{:,.0f} <span style="color:#D1D5DB;font-size:9px">/{:,.0f}</span></td>'
             '<td class="R">&#8377;{:.2f} <span style="color:#D1D5DB;font-size:9px">/&#8377;{:.2f}</span></td>'
             '{}'
             '<td class="R" style="font-weight:700">{}</td>'
             '<td class="R" style="font-size:10px;color:#6B7280">{}</td>'
             '</tr>'
         ).format(
-            bgs, r['cluster'], sd,
-            c['n'], p['n'],
-            c['kw'], p['kw'],
+            bgs, r['cluster'],
             c['rev_wp'], p['rev_wp'],
             gmcell(c['gm']),
             dpp(r['gm_d']),
@@ -724,28 +716,26 @@ def build(data):
 
     cl_thead = (
         '<thead style="position:sticky;top:0"><tr>'
-        '<th>Cluster</th><th>State</th>'
-        '<th class="R">Installs MTD/{}</th>'
-        '<th class="R">kW MTD/{}</th>'
+        '<th>Cluster</th>'
         '<th class="R">Rev/Wp MTD/{}</th>'
         '<th class="R">GM%</th>'
-        '<th class="R">&#916;pp</th>'
+        '<th class="R">&#916;%pts</th>'
         '<th class="R">Driver</th>'
         '</tr></thead>'
-    ).format(prev_lbl, prev_lbl, prev_lbl)
+    ).format(prev_lbl)
 
     cl_tbody = ''
     if declining:
-        cl_tbody += '<tr class="grp-row"><td colspan="8">&#9660; Declining vs {} &#8212; needs attention</td></tr>'.format(prev_lbl)
+        cl_tbody += '<tr class="grp-row"><td colspan="5">&#9660; Declining vs {} &#8212; needs attention</td></tr>'.format(prev_lbl)
         cl_tbody += ''.join(cl_row(r,'#FFFBFB') for r in declining)
     if improving:
-        cl_tbody += '<tr class="grp-row"><td colspan="8">&#9650; Improving vs {}</td></tr>'.format(prev_lbl)
+        cl_tbody += '<tr class="grp-row"><td colspan="5">&#9650; Improving vs {}</td></tr>'.format(prev_lbl)
         cl_tbody += ''.join(cl_row(r,'#F9FFFA') for r in improving)
     if stable_cl:
-        cl_tbody += '<tr class="grp-row"><td colspan="8">&#8594; Stable (within &plusmn;0.3pp)</td></tr>'
+        cl_tbody += '<tr class="grp-row"><td colspan="5">&#8594; Stable (within &plusmn;0.3pp)</td></tr>'
         cl_tbody += ''.join(cl_row(r) for r in stable_cl)
     if nascent:
-        cl_tbody += '<tr class="grp-row"><td colspan="8">&#9733; New / growing clusters</td></tr>'
+        cl_tbody += '<tr class="grp-row"><td colspan="5">&#9733; New / growing clusters</td></tr>'
         cl_tbody += ''.join(cl_row(r,'#FAF5FF') for r in nascent)
 
     cl_html = (
@@ -832,4 +822,3 @@ if __name__=='__main__':
         s.ehlo(); s.starttls(); s.login(SENDER, GMAIL_PASS)
         s.sendmail(SENDER, RECIPIENTS, msg.as_string())
     print('Sent: ' + subject, flush=True)
-    
