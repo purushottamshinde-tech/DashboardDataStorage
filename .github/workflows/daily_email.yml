@@ -30,5 +30,5 @@ jobs:
         env:
           GMAIL_PASSWORD: ${{ secrets.GMAIL_PASSWORD }}
           GMAIL_USER: purushottam.shinde@solarsquare.in
-          REPORT_TO: shindepurushottam7460@gmail.com,devika.g@solarsquare.in
+          REPORT_TO: shindepurushottam7460@gmail.com
         run: python send_daily_report.py
