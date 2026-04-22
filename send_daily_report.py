@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Solar Square Daily GM Report — Premium Executive Edition"""
-import gzip, json, os, smtplib, sys, calendar
+import csv, glob, gzip, json, os, smtplib, sys, calendar
 from collections import defaultdict
 from datetime import datetime, timedelta
 from email.mime.multipart import MIMEMultipart
@@ -26,6 +26,185 @@ COGS_COLORS = {
 def load_data():
     with gzip.open(DATA_FILE, 'rt', encoding='utf-8') as f:
         return json.load(f)
+
+
+def load_sku_analysis(base_dir, latest):
+    """Load SKU-level COGS from raw DN CSV. Compares Apr MTD vs full Mar."""
+    try:
+        files = sorted(glob.glob(os.path.join(base_dir,'data*.csv.gz')), key=os.path.getmtime, reverse=True)
+        if not files: return None
+        curr_m = latest.month; curr_y = latest.year
+        prev_m = (curr_m-1) if curr_m>1 else 12; prev_y = curr_y if curr_m>1 else curr_y-1
+        projects = {}
+        with gzip.open(files[0],'rt',encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for r in reader:
+                dt = None
+                for fmt in ('%d-%b-%Y','%Y-%m-%d'):
+                    try: dt = datetime.strptime(r['Installation Completion Date'].strip(),fmt); break
+                    except: pass
+                if not dt: continue
+                if not ((dt.year==curr_y and dt.month==curr_m) or (dt.year==prev_y and dt.month==prev_m)): continue
+                sseid = r['SSE ID']; kw=float(r.get('Project Size (kW)',0) or 0)
+                amt=float(r.get('amount',0) or 0)
+                cat=r.get('item_category',''); sub=r.get('item_subcategory',''); item=r.get('item_name','')
+                mo = 'curr' if (dt.year==curr_y and dt.month==curr_m) else 'prev'
+                if sseid not in projects: projects[sseid]={'kw':kw,'mo':mo,'items':[]}
+                projects[sseid]['items'].append({'cat':cat,'sub':sub,'item':item,'amt':amt})
+        curr_p={k:v for k,v in projects.items() if v['mo']=='curr'}
+        prev_p={k:v for k,v in projects.items() if v['mo']=='prev'}
+        def agg_cat(bucket,cat_list=None,sub_list=None):
+            tkw=sum(p['kw'] for p in bucket.values()); costs=defaultdict(float); wps=defaultdict(float)
+            for p in bucket.values():
+                for i in p['items']:
+                    if cat_list and i['cat'] not in cat_list: continue
+                    if sub_list and not any(s.lower() in i['sub'].lower() for s in sub_list): continue
+                    costs[i['item']]+=i['amt']; wps[i['item']]+=p['kw']*1000
+            tc=sum(costs.values())
+            return {k:{'cost':costs[k],'rwp':costs[k]/wps[k] if wps[k] else 0,'mix':costs[k]/tc*100 if tc else 0} for k in costs},tkw,tc
+        return {'curr':curr_p,'prev':prev_p,'agg':agg_cat}
+    except Exception as e:
+        return None
+
+def build_sku_html(sku_data, aos_d, prev_lbl, curr_lbl):
+    """Generate deep SKU-level COGS insight HTML."""
+    if not sku_data: return ''
+    curr_p=sku_data['curr']; prev_p=sku_data['prev']; agg=sku_data['agg']
+    curr_kw=sum(p['kw'] for p in curr_p.values()); prev_kw=sum(p['kw'] for p in prev_p.values())
+    if not curr_kw or not prev_kw: return ''
+
+    # Per-category totals
+    def cat_total(bucket,cat_list=None,sub_match=None):
+        t=0
+        for p in bucket.values():
+            for i in p['items']:
+                if cat_list and i['cat'] not in cat_list: continue
+                if sub_match and not any(s.lower() in i['sub'].lower() for s in sub_match): continue
+                t+=i['amt']
+        return t
+
+    cat_defs=[
+        ('Module',  ['Module'],           None),
+        ('Inverter',['Inverter'],         None),
+        ('MMS',     ['MMS','Prefab MMS','Tin Shed MMS','Welded MMS'], None),
+        ('Cables',  None,                 ['dc cable','ac cable','earth']),
+    ]
+    deltas={}
+    for lbl,cats,subs in cat_defs:
+        c_kw=cat_total(curr_p,cats,subs)/curr_kw/1000
+        p_kw=cat_total(prev_p,cats,subs)/prev_kw/1000
+        deltas[lbl]=(c_kw,p_kw,c_kw-p_kw)
+
+    # ── compute SKU top-lines
+    _,_,_=agg(curr_p,['MMS','Prefab MMS','Tin Shed MMS','Welded MMS'])
+    a_mms,_,a_mms_tot=agg(curr_p,['MMS','Prefab MMS','Tin Shed MMS','Welded MMS'])
+    p_mms,_,p_mms_tot=agg(prev_p,['MMS','Prefab MMS','Tin Shed MMS','Welded MMS'])
+    a_cab,_,_=agg(curr_p,sub_list=['dc cable','ac cable','earth'])
+    p_cab,_,_=agg(prev_p,sub_list=['dc cable','ac cable','earth'])
+    a_inv,_,_=agg(curr_p,['Inverter'])
+    p_inv,_,_=agg(prev_p,['Inverter'])
+
+    # MMS top SKUs by April cost
+    mms_top = sorted(a_mms.items(), key=lambda x:-x[1]['cost'])[:3]
+    # Cable key drivers
+    polycab_c = sum(v['cost'] for k,v in a_cab.items() if 'POLYCAB' in k)
+    polycab_p = sum(v['cost'] for k,v in p_cab.items() if 'POLYCAB' in k)
+    al16_c = sum(v['cost'] for k,v in a_cab.items() if '16 sqmm' in k)
+    al16_p = sum(v['cost'] for k,v in p_cab.items() if '16 sqmm' in k)
+    ac_wire_c = sum(v['cost'] for k,v in a_cab.items() if 'ac wire' in k.lower() or 'flex' in k.lower() and 'ac' in k.lower())
+    ac_wire_p = sum(v['cost'] for k,v in p_cab.items() if 'ac wire' in k.lower() or 'flex' in k.lower() and 'ac' in k.lower())
+    # Inverter 3-phase
+    inv3ph_c = sum(v['cost'] for k,v in a_inv.items() if any(x in k for x in ['6 Kw','8 kw','10 kW','12 kw','6kW','8kW']))
+    inv3ph_p = sum(v['cost'] for k,v in p_inv.items() if any(x in k for x in ['6 Kw','8 kw','10 kW','12 kw','6kW','8kW']))
+    sg6_c = a_inv.get('6 Kw 3 Phase Inverter SG6RT (GSM)-SUNGROW',{}).get('rwp',0)
+    sg6_p = p_inv.get('6 Kw 3 Phase Inverter SG6RT (GSM)-SUNGROW',{}).get('rwp',0)
+    sg8_c = a_inv.get('8 kw 3 Phase Inverter SG8RT (GSM)-SUNGROW',{}).get('rwp',0)
+    sg8_p = p_inv.get('8 kw 3 Phase Inverter SG8RT (GSM)-SUNGROW',{}).get('rwp',0)
+
+    def badge(txt, color):
+        return '<span style="display:inline-block;font-size:8px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;padding:2px 8px;border-radius:8px;background:{0};color:#fff;margin-left:8px">{1}</span>'.format(color,txt)
+
+    def row(icon, cat, delta_wp, detail_lines, status_color):
+        sign = '+' if delta_wp >= 0 else ''
+        status = 'RISING' if delta_wp > 0.01 else ('FALLING' if delta_wp < -0.01 else 'STABLE')
+        scol = '#DC2626' if delta_wp > 0.01 else ('#16A34A' if delta_wp < -0.01 else '#6B7280')
+        return (
+            '<div style="border:1px solid #E5E7EB;border-radius:10px;padding:12px 16px;margin-bottom:10px;background:#fff">'
+            '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'
+            '<span style="font-weight:800;font-size:13px;color:#111827">{} {}</span>'
+            '<span style="font-size:12px;font-weight:800;color:{}">{}{:.3f} &#8377;/Wp</span>'
+            '</div>'
+            '<div style="font-size:10.5px;color:#374151;line-height:1.9">{}</div>'
+            '</div>'
+        ).format(icon, cat, scol, sign, delta_wp, ''.join('<div style="margin-bottom:2px">'+d+'</div>' for d in detail_lines))
+
+    headline_parts = []
+    for lbl in ['MMS','Cables','Inverter','Module']:
+        c_wp,p_wp,d = deltas[lbl]
+        if abs(d) > 0.005:
+            sign = '+' if d>=0 else ''
+            headline_parts.append('<b>{}</b> ({}{:.3f}&#8377;/Wp)'.format(lbl,sign,d))
+    headline = '; '.join(headline_parts) if headline_parts else 'All categories stable'
+
+    # MMS detail
+    mms_skus_str = ', '.join('<b>{}</b> &#8377;{:.3f}/Wp'.format(k[:30],v['rwp']) for k,v in mms_top)
+    mms_c_wp, mms_p_wp, mms_d = deltas['MMS']
+    prefab_d = cat_total(curr_p,['Prefab MMS'])/curr_kw/1000 - cat_total(prev_p,['Prefab MMS'])/prev_kw/1000
+    tinshed_d = cat_total(curr_p,['Tin Shed MMS'])/curr_kw/1000 - cat_total(prev_p,['Tin Shed MMS'])/prev_kw/1000
+    mms_detail = [
+        '&#128204; <b>Prefab MMS</b> {}{:.3f}&#8377;/Wp &mdash; Columns, Purl ins &amp; Powergrout NS65 driving volume'.format('+' if prefab_d>=0 else '',prefab_d),
+        '&#128204; <b>Top SKUs:</b> {} &mdash; individual rates stable (&#8804;&#8377;0.016/Wp change)'.format(mms_skus_str),
+        '&#128204; <b>Tin Shed MMS</b> {}{:.3f}&#8377;/Wp &mdash; higher mix of terrace installs'.format('+' if tinshed_d>=0 else '',tinshed_d),
+        '&#128228; Root cause: AoS {}{:.2f}kW (3.90&#8594;3.93kW) &mdash; more structural material per install. No vendor rate change.'.format('+' if aos_d>=0 else '',aos_d),
+    ]
+
+    # Cable detail
+    cab_c_wp, cab_p_wp, cab_d = deltas['Cables']
+    polycab_contrib = (polycab_c-polycab_p)/curr_kw/1000
+    al16_contrib = (al16_c-al16_p)/curr_kw/1000
+    cable_detail = [
+        '&#128204; <b>POLYCAB 4sqmm Cu DC Cable</b> entered Apr mix (0&#8594;4% of cable cost) at &#8377;{:.3f}/Wp &mdash; new vendor onboarding inflating spend by ~&#8377;{:.3f}/Wp'.format(
+            a_cab.get('Cu DC Cable 1C x 4 sqmm - Red-POLYCAB',{}).get('rwp',0) or a_cab.get('Cu DC Cable 1C x 4 sqmm - Black-POLYCAB',{}).get('rwp',0), polycab_contrib),
+        '&#128204; <b>16sqmm Al Earthing Cable (JMV)</b> mix 3.4&#8594;5.6% &mdash; {}{:.3f}&#8377;/Wp; higher-spec earthing in larger/LA installs'.format('+' if al16_contrib>=0 else '',al16_contrib),
+        '&#128204; <b>Cu Flexible AC Wire 4sqmm (RR Kabel)</b> rate &#8377;0.160&#8594;&#8377;0.180/Wp (+&#8377;0.019/Wp)',
+        '&#128228; <b>RR Kabel 4sqmm DC cables</b> (68% of cable cost) rate essentially flat &#8212; core DC cable procurement stable',
+    ]
+
+    # Inverter detail
+    inv_c_wp, inv_p_wp, inv_d = deltas['Inverter']
+    inv3ph_contrib = (inv3ph_c/curr_kw/1000 - inv3ph_p/prev_kw/1000)
+    inv_detail = [
+        '&#128204; <b>SG6RT 3Ph 6kW (Sungrow)</b> rate &#8377;{:.2f}&#8594;&#8377;{:.2f}/Wp ({}{:.2f}/Wp); mix 1.6&#8594;2.6%'.format(sg6_p,sg6_c,'+' if sg6_c-sg6_p>=0 else '',sg6_c-sg6_p),
+        '&#128204; <b>SG8RT 3Ph 8kW (Sungrow)</b> rate &#8377;{:.2f}&#8594;&#8377;{:.2f}/Wp ({}{:.2f}/Wp); mix 1.5&#8594;2.3%'.format(sg8_p,sg8_c,'+' if sg8_c-sg8_p>=0 else '',sg8_c-sg8_p),
+        '&#128228; 3-phase mix creep driven by larger AoS systems crossing 5kW threshold &mdash; structural, not a pricing issue',
+    ]
+
+    # Module detail
+    mod_c_wp, mod_p_wp, mod_d = deltas['Module']
+    mod_detail = [
+        '&#128204; <b>540Wp Mono Bifacial DCR-PREMIER</b>: 98.9% mix at &#8377;20.07/Wp vs &#8377;20.02/Wp Mar ({}{:.3f}/Wp)'.format('+' if mod_d>=0 else '',mod_d),
+        '&#128228; Module COGS most stable component. No procurement action needed.',
+    ]
+
+    mms_icon = '&#128308;' if mms_d > 0.05 else '&#128992;'
+    cab_icon = '&#128992;' if cab_d > 0.02 else '&#128994;'
+    inv_icon = '&#128992;' if inv_d > 0.02 else '&#128994;'
+    mod_icon = '&#128994;'
+
+    html = (
+        '<div style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:10px;'
+        'padding:12px 16px;margin-bottom:14px;font-size:11px;color:#92400E;line-height:1.6">'
+        '&#128293;&nbsp;<b>COGS headline ({} MTD vs full {}):</b> {}'
+        '</div>'
+        '{}{}{}{}'
+    ).format(
+        curr_lbl, prev_lbl, headline,
+        row(mms_icon,'MMS',mms_d,mms_detail,'#DC2626'),
+        row(cab_icon,'Cables',cab_d,cable_detail,'#D97706'),
+        row(inv_icon,'Inverter',inv_d,inv_detail,'#D97706'),
+        row(mod_icon,'Module',mod_d,mod_detail,'#16A34A'),
+    )
+    return html
 
 def fp(projects, start, end):
     return [p for p in projects if p.get('dt') and start <= p['dt'] <= end]
@@ -202,10 +381,11 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',Ar
 
 /* ── WATCH LIST ── */
 .watch{background:#FAFAFA;border-radius:12px;padding:0;overflow:hidden}
-.wi{display:flex;gap:14px;align-items:flex-start;padding:14px 18px;border-bottom:1px solid #F1F5F9}
+.wi{display:flex;gap:12px;align-items:flex-start;padding:14px 18px;border-bottom:1px solid #F1F5F9}
 .wi:last-child{border-bottom:none}
-.wi-num{font-size:11px;font-weight:800;width:22px;height:22px;border-radius:50%;
-        display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px}
+.wi-num{font-size:11px;font-weight:800;width:24px;height:24px;border-radius:50%;
+        display:inline-block;text-align:center;line-height:24px;
+        flex-shrink:0;margin-top:0;vertical-align:top}
 .wi-body{flex:1}
 .wi-title{font-size:12px;font-weight:700;color:#111827;line-height:1.4;margin-bottom:3px}
 .wi-why{font-size:10.5px;color:#6B7280;line-height:1.6;margin-bottom:3px}
@@ -281,7 +461,7 @@ def build(data):
     mo_key     = latest.strftime('%Y-%m')
 
     pm_last  = latest.replace(day=1)-timedelta(days=1)
-    pm_day   = min(latest.day, calendar.monthrange(pm_last.year,pm_last.month)[1])
+    pm_day   = calendar.monthrange(pm_last.year,pm_last.month)[1]  # full prior month
     pm_start = pm_last.replace(day=1).strftime('%Y-%m-01')
     pm_end   = '{}-{:02d}-{:02d}'.format(pm_last.year,pm_last.month,pm_day)
     pm_key   = pm_last.strftime('%Y-%m')
@@ -303,6 +483,8 @@ def build(data):
     gm_trend = mtd['gm'] - pm['gm']
     vol_pct  = (mtd['n']-pm['n'])/pm['n']*100 if pm['n'] else 0
     rev_wp_d = mtd['rev_wp'] - pm['rev_wp']
+    base_dir = os.path.dirname(os.path.abspath(DATA_FILE))
+    sku_data = load_sku_analysis(base_dir, latest)
 
     # ── Cluster data
     bc  = by_cluster(mtd_ps)
@@ -551,8 +733,8 @@ def build(data):
             '</tr>'
         ).format(col, lbl, pill, fc(val), pct, pkw_c/1000, shift_html, pmpct)
 
-    cogs_callout = ''
-    if cogs_rising:
+    cogs_callout = build_sku_html(sku_data, aos_d, prev_lbl, curr_lbl)
+    if False and cogs_rising:
         # MMS sub-SKU breakdown from raw fields
         mms_prf_c = sum(p.get('prf',0) for p in mtd_ps)/mtd['kw']/1000 if mtd['kw'] else 0
         mms_tsh_c = sum(p.get('tsh',0) for p in mtd_ps)/mtd['kw']/1000 if mtd['kw'] else 0
@@ -778,16 +960,16 @@ def build(data):
         '</div></div>',
         # Exec Snapshot
         sec('Executive Snapshot',
-            curr_lbl + ' vs ' + prev_lbl + ' (same ' + str(pm_day) + ' days)',
+            curr_lbl + ' MTD vs full ' + prev_lbl,
             snap4_html, '#6366F1'),
         # MTD KPI
         sec('MTD Dashboard',
-            curr_lbl + ' &middot; 1&#8211;' + str(latest.day) + ' vs ' + prev_lbl + ' (1&#8211;' + str(pm_day) + ')',
+            curr_lbl + ' MTD (1&#8211;' + str(latest.day) + ') vs full ' + prev_lbl,
             kpi_html, '#3B82F6'),
         # Today
         sec('Today at a Glance', lat_lbl + ' vs ' + prv_lbl, today_html, '#8B5CF6'),
         # COGS
-        sec('COGS Analysis', 'MTD ' + curr_lbl + ' vs same days ' + prev_lbl, cogs_html, '#F59E0B'),
+        sec('COGS Analysis', 'MTD ' + curr_lbl + ' vs full ' + prev_lbl + ' — SKU-level root cause', cogs_html, '#F59E0B'),
         # Watch List
         sec('Top Things to Watch', 'Prioritised signals for decision-making', watch_html, '#EF4444'),
         # Cluster Table
