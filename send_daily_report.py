@@ -12,6 +12,8 @@ GMAIL_PASS = os.environ.get("GMAIL_PASSWORD", "")
 DATA_FILE  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "projects.json.gz")
 MIN_ORDERS = 10
 
+NCR_CITIES = {'Gurgaon','Gurugram','Noida','Ghaziabad','Faridabad'}
+
 STATE_DISPLAY = {
     'Delhi':'Delhi','Gujrat':'Gujarat','Karnataka':'Karnataka',
     'Madhya Pradesh':'MP','MH East':'MH East','MH West':'MH West',
@@ -176,7 +178,7 @@ def build_sku_html(sku_data, aos_d, prev_lbl, curr_lbl):
     inv_detail = [
         '&#128204; <b>SG6RT 3Ph 6kW (Sungrow)</b> rate &#8377;{:.2f}&#8594;&#8377;{:.2f}/Wp ({}{:.2f}/Wp); mix 1.6&#8594;2.6%'.format(sg6_p,sg6_c,'+' if sg6_c-sg6_p>=0 else '',sg6_c-sg6_p),
         '&#128204; <b>SG8RT 3Ph 8kW (Sungrow)</b> rate &#8377;{:.2f}&#8594;&#8377;{:.2f}/Wp ({}{:.2f}/Wp); mix 1.5&#8594;2.3%'.format(sg8_p,sg8_c,'+' if sg8_c-sg8_p>=0 else '',sg8_c-sg8_p),
-        '&#128228; 3-phase mix creep driven by larger AoS systems crossing 5kW threshold &mdash; structural, not a pricing issue',
+        '&#128228; 3-phase mix creep driven by larger AoS systems crossing 5kW threshold &mdash; structural, not a revenue issue',
     ]
 
     # Module detail
@@ -241,9 +243,13 @@ def inject_meta(m, mo_onm_qhse, key):
             m['adj_gm']=(m['rev']-m['cogs']-m['onm']-m['qhs'])/m['rev']*100
     return m
 
+def normalise_city(city, state):
+    if state=='Delhi' and city in NCR_CITIES: return 'Delhi NCR'
+    return city
+
 def by_cluster(projects):
     d=defaultdict(list)
-    for p in projects: d[(p['s'],p['c'])].append(p)
+    for p in projects: d[(p['s'],normalise_city(p['c'],p['s']))].append(p)
     return d
 
 def get_driver(curr, prev):
@@ -256,14 +262,19 @@ def get_driver(curr, prev):
         cogs_kw_d=curr['cogs_kw']-prev['cogs_kw'],
     )
     factors=[]
-    if d['rev_wp_d']>1.2:    factors.append((abs(d['rev_wp_d'])*10,'price_up','Pricing +Rs{:.1f}/Wp'.format(d['rev_wp_d'])))
-    elif d['rev_wp_d']<-1.2: factors.append((abs(d['rev_wp_d'])*10,'price_dn','Pricing -Rs{:.1f}/Wp'.format(abs(d['rev_wp_d']))))
+    if d['rev_wp_d']>1.2:    factors.append((abs(d['rev_wp_d'])*10,'price_up','Rev/Wp +&#8377;{:.1f}/Wp'.format(d['rev_wp_d'])))
+    elif d['rev_wp_d']<-1.2: factors.append((abs(d['rev_wp_d'])*10,'price_dn','Rev/Wp &#8722;&#8377;{:.1f}/Wp'.format(abs(d['rev_wp_d']))))
     if d['aos_d']>0.25:      factors.append((d['aos_d']*8,'size_up','AoS +{:.2f}kW'.format(d['aos_d'])))
-    elif d['aos_d']<-0.25:   factors.append((abs(d['aos_d'])*8,'size_dn','AoS {:.2f}kW'.format(d['aos_d'])))
-    if d['cogs_kw_d']<-2500: factors.append((abs(d['cogs_kw_d'])/1000,'cogs_dn','COGS -Rs{:.0f}/kW'.format(abs(d['cogs_kw_d']))))
-    elif d['cogs_kw_d']>2500:factors.append((d['cogs_kw_d']/1000,'cogs_up','COGS +Rs{:.0f}/kW'.format(d['cogs_kw_d'])))
+    elif d['aos_d']<-0.25:   factors.append((abs(d['aos_d'])*8,'size_dn','AoS &#8722;{:.2f}kW'.format(abs(d['aos_d']))))
+    if d['cogs_kw_d']<-2500: factors.append((abs(d['cogs_kw_d'])/1000,'cogs_dn','COGS &#8722;&#8377;{:.0f}/kW'.format(abs(d['cogs_kw_d']))))
+    elif d['cogs_kw_d']>2500:factors.append((d['cogs_kw_d']/1000,'cogs_up','COGS +&#8377;{:.0f}/kW'.format(d['cogs_kw_d'])))
     if not factors:
-        return 'Stable', d, 'Minor blended shifts'
+        sub=[]
+        if abs(d['rev_wp_d'])>0.3: sub.append('Rev/Wp {:+.1f}/Wp'.format(d['rev_wp_d']))
+        if abs(d['aos_d'])>0.05:   sub.append('AoS {:+.2f}kW'.format(d['aos_d']))
+        if abs(d['cogs_kw_d'])>300:sub.append('COGS {:+,.0f}/kW'.format(d['cogs_kw_d']))
+        tag='; '.join(sub) if sub else 'All metrics <0.5% shift'
+        return tag, d, tag
     factors.sort(key=lambda x:-x[0])
     tag='; '.join(f[2] for f in factors[:2])
     types=[f[1] for f in factors[:2]]
@@ -549,17 +560,17 @@ def build(data):
         hero_grad = 'linear-gradient(135deg,#0369A1 0%,#0284C7 50%,#0EA5E9 100%)'
     elif len(price_dn) >= 2:
         names_short = ', '.join(c for c,_ in price_dn[:3])
-        headline = 'Revenue realisation falling in {} markets ({}) &#8212; GM holding but pricing needs attention'.format(len(price_dn), names_short)
+        headline = 'Revenue realisation falling in {} markets ({}) &#8212; GM holding but revenue realisation needs attention'.format(len(price_dn), names_short)
         hero_grad = 'linear-gradient(135deg,#0369A1 0%,#0284C7 50%,#0EA5E9 100%)'
     elif len(price_dn) == 1:
         headline = 'Revenue realisation dip in {} &#8212; overall business metrics on track'.format(price_dn[0][0])
         hero_grad = 'linear-gradient(135deg,#0369A1 0%,#0284C7 50%,#0EA5E9 100%)'
     elif gm_trend >= 0.5:
-        headline = 'GM expanding {:.1f}ppt MoM &#8212; pricing discipline and volume growth aligned'.format(gm_trend)
+        headline = 'GM expanding {:.1f}ppt MoM &#8212; revenue discipline and volume growth aligned'.format(gm_trend)
         hero_grad = 'linear-gradient(135deg,#0369A1 0%,#0284C7 50%,#0EA5E9 100%)'
     elif gm_trend <= -0.5:
         headline = 'GM contracting {:.1f}ppt MoM &#8212; root cause: {}'.format(
-            abs(gm_trend), 'COGS mix shift' if cogs_net_gm < -0.3 else 'pricing pressure')
+            abs(gm_trend), 'COGS mix shift' if cogs_net_gm < -0.3 else 'revenue pressure')
         hero_grad = 'linear-gradient(135deg,#0369A1 0%,#0284C7 50%,#0EA5E9 100%)'
     elif vol_pct >= 15:
         headline = 'Volume surge +{:.0f}% MoM &#8212; GM stable at {:.2f}% despite scale-up'.format(vol_pct, mtd['gm'])
@@ -693,6 +704,64 @@ def build(data):
         + '</tr></table>'
     )
 
+
+    # ── PRODUCT MIX (Offer Type)
+    OFFER_LABELS = {'GoodZero':'GZ','GoodZero Pro':'GZ Pro','GoodZero Uno':'GZ Uno',
+                    'SSE Blue':'SSE Blue','Regular':'Non-GZ','regular':'Non-GZ','':'Non-GZ'}
+    OFFER_ORDER  = ['GZ','GZ Pro','GZ Uno','SSE Blue','Non-GZ']
+    OFFER_COLORS = {'GZ':'#2563EB','GZ Pro':'#7C3AED','GZ Uno':'#0891B2',
+                    'SSE Blue':'#0369A1','Non-GZ':'#6B7280'}
+
+    def by_offer(plist):
+        d = defaultdict(list)
+        for p in plist:
+            lbl = OFFER_LABELS.get(p.get('o',''), 'Non-GZ')
+            d[lbl].append(p)
+        return d
+
+    mix_mtd = by_offer(mtd_ps); mix_pm = by_offer(pm_ps)
+    mix_rows = ''
+    for lbl in OFFER_ORDER:
+        mc = calc(mix_mtd.get(lbl,[])); mp = calc(mix_pm.get(lbl,[]))
+        if mc['n'] == 0 and mp['n'] == 0: continue
+        pct_n = mc['n']/mtd['n']*100 if mtd['n'] else 0
+        col = OFFER_COLORS.get(lbl,'#6B7280')
+        gm_d_html = dpp(mc['gm']-mp['gm']) if mp['n']>0 else '<span style="color:#94A3B8">new</span>'
+        rwp_d = mc['rev_wp']-mp['rev_wp'] if mp['n']>0 else 0
+        rwp_d_html = dpval(rwp_d,'&#8377;/Wp') if mp['n']>0 else ''
+        mix_rows += (
+            '<tr>'
+            '<td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;'
+            'background:{};margin-right:7px;vertical-align:middle"></span>'
+            '<b style="color:#111827">{}</b></td>'
+            '<td class="R">{:,}</td>'
+            '<td class="R" style="color:#6B7280;font-size:10px">{:.0f}%</td>'
+            '<td class="R">&#8377;{:.2f}/Wp</td>'
+            '<td class="R" style="font-weight:700;color:{}">{:.2f}%</td>'
+            '<td class="R">{}</td>'
+            '<td class="R">{}</td>'
+            '</tr>'
+        ).format(col, lbl, mc['n'], pct_n, mc['rev_wp'], gmc(mc['gm']), mc['gm'], gm_d_html, rwp_d_html)
+
+    # Donut-style mix bar
+    mix_bar = ''
+    for lbl in OFFER_ORDER:
+        mc = calc(mix_mtd.get(lbl,[]))
+        pct = mc['n']/mtd['n']*100 if mtd['n'] else 0
+        if pct < 0.5: continue
+        col = OFFER_COLORS.get(lbl,'#6B7280')
+        mix_bar += '<div style="flex:{};background:{};height:100%;display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:700;color:#fff;overflow:hidden;padding:0 4px;white-space:nowrap">{}</div>'.format(
+            round(pct), col, lbl if pct > 8 else '')
+
+    mix_html = (
+        '<div style="height:24px;border-radius:8px;overflow:hidden;display:flex;margin-bottom:14px;gap:1px">{}</div>'
+        '<table class="cg"><thead><tr>'
+        '<th>Offer Type</th><th class="R">Installs MTD</th><th class="R">Mix%</th>'
+        '<th class="R">Rev/Wp</th><th class="R">GM%</th>'
+        '<th class="R">&#916;GM vs full {}</th><th class="R">&#916;Rev/Wp</th>'
+        '</tr></thead><tbody>{}</tbody></table>'
+    ).format(mix_bar, prev_lbl, mix_rows)
+
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     #  COGS SECTION
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -800,7 +869,7 @@ def build(data):
         watch_items.append((priority,
             'Revenue realisation drop in {} cluster{}'.format(len(price_dn), 's' if len(price_dn)>1 else ''),
             'Revenue realisation (Rev/Wp) fell &gt;&#8377;1.2/Wp vs prior month in: {}{}.'.format(names_w, leftover),
-            'Review discount approvals and cohort pricing in these markets. Check if recent deals set a lower benchmark.'))
+            'Review discount approvals and cohort revenue in these markets. Check if recent deals set a lower benchmark.'))
 
     # COGS pressure
     if cogs_rising and cogs_net_gm < -0.2:
@@ -826,7 +895,7 @@ def build(data):
         watch_items.append((1,
             'Mild GM softness: {:.2f}ppt MoM'.format(gm_trend),
             'Blended GM edged down slightly. May be mix-driven as volume scales.'.format(abs(gm_trend)),
-            'Watch weekly trend. If continues for 3+ days, escalate pricing review.'))
+            'Watch weekly trend. If continues for 3+ days, escalate revenue review.'))
 
     # Volume
     if vol_pct >= 20:
@@ -853,7 +922,7 @@ def build(data):
 
     if not watch_items:
         watch_items = [(2, 'All metrics within normal range',
-            'No anomalies detected across pricing, COGS, volume, or GM.',
+            'No anomalies detected across revenue, COGS, volume, or GM.',
             'Continue monitoring daily.')]
 
     wi_classes = {0:'wi-red', 1:'wi-yel', 2:'wi-grn'}
@@ -968,6 +1037,8 @@ def build(data):
             kpi_html, '#3B82F6'),
         # Today
         sec('Today at a Glance', lat_lbl + ' vs ' + prv_lbl, today_html, '#8B5CF6'),
+        # Product Mix
+        sec('Product Mix', 'Offer type breakdown · MTD ' + curr_lbl + ' vs full ' + prev_lbl, mix_html, '#7C3AED'),
         # COGS
         sec('COGS Analysis', 'MTD ' + curr_lbl + ' vs full ' + prev_lbl + ' — SKU-level root cause', cogs_html, '#F59E0B'),
         # Watch List
