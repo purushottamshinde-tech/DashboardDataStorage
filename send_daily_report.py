@@ -151,8 +151,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',Ar
 
 /* ── SECTION WRAPPER ── */
 .sec{padding:22px 32px;border-bottom:1px solid #F1F5F9}
-.sec-hd{display:flex;align-items:center;gap:8px;margin-bottom:16px}
-.sec-bar{width:3px;height:16px;border-radius:2px;flex-shrink:0}
+.sec-hd{display:flex;align-items:center;gap:6px;margin-bottom:16px}
 .sec-title{font-size:9.5px;font-weight:800;letter-spacing:1.4px;text-transform:uppercase;color:#374151}
 .sec-sub{font-size:9px;color:#94A3B8;margin-left:4px;letter-spacing:.3px}
 
@@ -238,15 +237,35 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',Ar
 .ftr a{color:#6366F1;text-decoration:none}
 
 @media(max-width:600px){
-  body{padding:8px}
-  .sec{padding:16px}
-  .hero{padding:20px 16px 18px}
-  .hero-headline{font-size:16px}
+  body{padding:6px}
+  .wrap{border-radius:10px}
+  .sec{padding:14px 14px}
+  .hero{padding:18px 14px 16px}
+  .hero-headline{font-size:15px;letter-spacing:-.2px}
+  .hero-eyebrow{font-size:8.5px}
+  .hero-badges{gap:5px}
+  .badge{font-size:9px;padding:3px 9px}
+  /* ── 2-col card grid on mobile ── */
   .snap4,.snap4 tbody,.snap4 tr,
   .kgrid,.kgrid tbody,.kgrid tr,
-  .today-grid,.today-grid tbody,.today-grid tr{display:block!important}
-  .ec,.kc,.tc{display:inline-block!important;width:calc(50% - 10px)!important;
-              margin:4px!important;vertical-align:top}
+  .today-grid,.today-grid tbody,.today-grid tr{display:block!important;width:100%!important}
+  .ec{display:inline-block!important;width:calc(50% - 8px)!important;
+      margin:4px!important;vertical-align:top;padding:12px 12px!important}
+  .ec-val{font-size:19px!important}
+  .kc{display:inline-block!important;width:calc(50% - 8px)!important;
+      margin:4px!important;vertical-align:top;padding:11px 12px!important}
+  .kc-val{font-size:17px!important}
+  .tc{display:inline-block!important;width:calc(50% - 8px)!important;
+      margin:4px!important;vertical-align:top;padding:10px 10px!important}
+  .tc-today{font-size:16px!important}
+  /* ── Tables: scroll horizontally ── */
+  .cg,.cl-t{font-size:10px}
+  .cg th,.cg td,.cl-t th,.cl-t td{padding:6px 7px!important}
+  /* ── Watch list ── */
+  .wi{padding:12px 12px!important;gap:10px}
+  .wi-title{font-size:11px!important}
+  .wi-why{font-size:10px!important}
+  .ftr{padding:12px 14px}
 }
 """
 
@@ -743,11 +762,10 @@ def build(data):
         return (
             '<div class="sec">'
             '<div class="sec-hd">'
-            '<div class="sec-bar" style="background:{}"></div>'
             '<span class="sec-title">{}</span>'
             '<span class="sec-sub">{}</span>'
             '</div>{}</div>'
-        ).format(bar_color, title, sub, body)
+        ).format(title, sub, body)
 
     html = ''.join([
         '<!DOCTYPE html><html lang="en"><head>',
@@ -814,3 +832,4 @@ if __name__=='__main__':
         s.ehlo(); s.starttls(); s.login(SENDER, GMAIL_PASS)
         s.sendmail(SENDER, RECIPIENTS, msg.as_string())
     print('Sent: ' + subject, flush=True)
+    
