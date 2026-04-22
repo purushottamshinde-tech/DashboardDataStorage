@@ -4,9 +4,9 @@ on:
   # Manual trigger — keep for ad-hoc runs
   workflow_dispatch:
 
-  # Daily at 8:30 AM IST = 03:00 UTC
-schedule:
-  - cron: '0 3 * * *'   # Mon–Sun; change to * for all 7 days
+  # Daily at 8:30 AM IST = 03:00 UTC, all 7 days
+  schedule:
+    - cron: '0 3 * * *'
 
   # Also fire automatically after the data sync workflow completes
   workflow_run:
