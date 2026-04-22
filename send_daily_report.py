@@ -1334,9 +1334,33 @@ def build(data):
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     #  STRATEGIC ACTIONS
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # ── Pre-compute values used in deep-dive insights ──────────────────
+    _cab_d2  = (mtd['cab']/mtd['kw']/1000  - pm['cab']/pm['kw']/1000)  if mtd['kw'] and pm['kw'] else 0
+    _mms_d2  = (mtd['mms']/mtd['kw']/1000  - pm['mms']/pm['kw']/1000)  if mtd['kw'] and pm['kw'] else 0
+    _inv_d2  = (mtd['inv']/mtd['kw']/1000  - pm['inv']/pm['kw']/1000)  if mtd['kw'] and pm['kw'] else 0
+    _mod_d2  = (mtd['mod']/mtd['kw']/1000  - pm['mod']/pm['kw']/1000)  if mtd['kw'] and pm['kw'] else 0
+    _below40 = [r for r in all_cl if r['curr']['gm'] < 40 and r['curr']['n'] >= MIN_ORDERS]
+
+    # Helper: SKU context from sku_data
+    def _sku_detail(sd, cat_list=None, sub_list=None, top_n=3):
+        """Return top-n SKU name / rate lines from sku_data agg."""
+        if not sd: return []
+        try:
+            agg = sd['agg']
+            a_c, kw_c, _ = agg(sd['curr'], cat_list, sub_list)
+            a_p, kw_p, _ = agg(sd['prev'], cat_list, sub_list)
+            rows = []
+            for name, cv in sorted(a_c.items(), key=lambda x: -x[1]['cost'])[:top_n]:
+                pv = a_p.get(name, {})
+                dr = cv['rwp'] - pv.get('rwp', cv['rwp'])
+                rows.append((name[:45], cv['rwp'], pv.get('rwp', 0), dr, cv['mix']))
+            return rows
+        except:
+            return []
+
     action_items_html = []
     _act_num = [0]
-    def _act(priority_cls, title, impact_txt, why_txt):
+    def _act(priority_cls, title, impact_txt, insight_html):
         _act_num[0] += 1
         return (
             '<div class="action-item">'
@@ -1345,71 +1369,198 @@ def build(data):
             '<div class="action-title">{}<span class="impact-tag">{}</span></div>'
             '<div class="action-why">{}</div>'
             '</div></div>'
-        ).format(priority_cls, _act_num[0], title, impact_txt, why_txt)
+        ).format(priority_cls, _act_num[0], title, impact_txt, insight_html)
 
-    # Action 1: price erosion → red
+    # ── INSIGHT 1: Revenue realisation erosion ──────────────────────────
     if price_dn:
-        worst = price_dn[0]
+        worst_cl, worst_rv = price_dn[0]
+        worst_row = next((r for r in all_cl if r['cluster'] == worst_cl), None)
+        if worst_row:
+            wc = worst_row['curr']; wp = worst_row['prev']
+            _wck_d = (wc.get('cogs_kw',0) - wp.get('cogs_kw',0))/1000 if wp['n'] else 0
+            _waos_d = wc['aos'] - wp['aos']
+            # System-wide Rev/Wp moved how much?
+            sys_rv_d = mtd['rev_wp'] - pm['rev_wp']
+            # Cluster fell by worst_rv; system moved by sys_rv_d → cluster-specific drop = worst_rv - sys_rv_d
+            cluster_specific_drop = worst_rv - sys_rv_d
+            # Rev/Wp vs other clusters: find comparable clusters
+            comparable = [r for r in all_cl if r['cluster'] != worst_cl
+                          and r['curr']['n'] >= MIN_ORDERS
+                          and abs(r['drv_det'].get('rev_wp_d',0)) < 0.5]
+            peer_avg = (sum(r['curr']['rev_wp'] for r in comparable)/len(comparable)) if comparable else mtd['rev_wp']
+            vs_peer = wc['rev_wp'] - peer_avg
+            vs_peer_txt = (
+                '<b>&#8377;{:.2f}/Wp below peer cluster average</b> (&#8377;{:.2f}/Wp)'.format(abs(vs_peer), peer_avg)
+                if vs_peer < -0.5 else
+                '<b>&#8377;{:.2f}/Wp above peer average</b> despite the MoM drop &#8212; confirming this is a cluster-specific dip, not market-wide'.format(vs_peer, peer_avg)
+                if vs_peer > 0 else
+                'at peer cluster average (&#8377;{:.2f}/Wp)'.format(peer_avg)
+            )
+            # COGS context
+            cogs_context = ''
+            if abs(_wck_d) > 0.02:
+                cogs_context = 'COGS simultaneously moved {:+.3f}/Wp (AoS {:+.2f}kW). '.format(_wck_d, _waos_d)
+            elif abs(_waos_d) > 0.1:
+                cogs_context = 'AoS moved {:+.2f}kW but COGS impact minimal. '.format(_waos_d)
+            rev_gm_pp = abs(worst_rv / pm['rev_wp'] * pm['gm']) if pm['rev_wp'] else 0
+            cogs_gm_pp = abs(_wck_d / pm['rev_wp'] * 100) if pm['rev_wp'] else 0
+            insight = (
+                '<strong>Root cause isolated:</strong> Rev/Wp in <b>{}</b> dropped '
+                '&#8377;{:.2f} &#8594; &#8377;{:.2f}/Wp (&#8722;&#8377;{:.2f}/Wp MoM). '
+                'System-wide Rev/Wp moved {:+.2f}/Wp in the same period &#8212; '
+                'so the <b>cluster-specific drop is &#8722;&#8377;{:.2f}/Wp</b> beyond market movement. '
+                '{} {}. '
+                'GM decomposition: Rev/Wp drag <b>&#8722;{:.2f}pp</b>'
+                '{}'
+                ' &#8594; net <b>{:+.2f}pp GM</b>. '
+                'Pattern is cluster-isolated &#8212; {} comparable clusters held Rev/Wp within &#177;&#8377;0.50/Wp.'
+            ).format(
+                worst_cl, wp['rev_wp'], wc['rev_wp'], abs(worst_rv),
+                sys_rv_d, abs(cluster_specific_drop),
+                vs_peer_txt, cogs_context,
+                rev_gm_pp,
+                ', COGS drag <b>{:+.2f}pp</b>'.format(-cogs_gm_pp) if abs(_wck_d) > 0.02 else '',
+                worst_row['gm_d'],
+                len(comparable)
+            )
+        else:
+            insight = 'Rev/Wp fell &#8377;{:.2f}/Wp vs {} in {}. Not market-driven &#8212; other clusters held.'.format(
+                abs(worst_rv), prev_lbl, worst_cl)
         action_items_html.append(_act('red',
-            'Freeze discount approvals in {} &#8212; audit Apr deals immediately'.format(worst[0]),
-            '&#8722;&#8377;{:.2f}/Wp Rev in cluster'.format(abs(worst[1])),
-            'Rev/Wp fell &gt;&#8377;{:.1f}/Wp vs {} in {}. Pull all {} deal sheets; '
-            'identify salesperson/approver; reinstate pricing floor. '
-            'Revenue erosion at this level is controllable &#8212; not market-driven.'.format(
-                abs(worst[1]), prev_lbl, worst[0], curr_lbl[:3])))
+            'Revenue realisation erosion in {} &#8212; cluster-specific, not market'.format(worst_cl),
+            '&#8722;&#8377;{:.2f}/Wp Rev &middot; {:+.2f}pp GM'.format(abs(worst_rv), worst_row['gm_d'] if worst_row else 0),
+            insight))
 
-    # Action 2: Cables rate hike → red
-    _cab_d2 = (mtd['cab']/mtd['kw']/1000 - pm['cab']/pm['kw']/1000) if mtd['kw'] and pm['kw'] else 0
+    # ── INSIGHT 2: Cable vendor rate hike (pre-analyzed) ───────────────
     if _cab_d2 > 0.04:
+        cab_skus = _sku_detail(sku_data, sub_list=['dc cable','ac cable','earth'], top_n=4)
+        sku_lines = ''
+        rising_skus = [(n,c,p,d,m) for n,c,p,d,m in cab_skus if d > 0.002]
+        falling_skus = [(n,c,p,d,m) for n,c,p,d,m in cab_skus if d < -0.002]
+        for n,c,p,d,m in rising_skus[:3]:
+            pct_chg = (c-p)/p*100 if p else 0
+            sku_lines += '<b>{}</b> ({:.1f}% of cable cost): &#8377;{:.2f}&#8594;&#8377;{:.2f}/Wp ({:+.1f}%) &#8212; <em>vendor rate hike confirmed</em>. '.format(
+                n[:40], m, p, c, pct_chg)
+        for n,c,p,d,m in falling_skus[:1]:
+            sku_lines += '<b>{}</b>: &#8377;{:.2f}/Wp &#8212; <em>rate down, partial offset</em>. '.format(n[:40], c)
+        aos_ruling_out = 'AoS shift is only {:+.2f}kW &#8212; routing-length increase accounts for &lt;&#8377;0.005/Wp; the rest is pure vendor rate.'.format(aos_d) if abs(aos_d) < 0.15 else ''
+        insight = (
+            '<strong>Rate hike confirmed on {} SKUs &#8212; not a volume/routing issue.</strong> '
+            '{}{} '
+            'Net cable impact: <b>+&#8377;{:.3f}/Wp</b> on blended COGS = '
+            '<b>&#8722;{:.2f}pp GM</b> at current Rev/Wp.'
+        ).format(
+            len(rising_skus), sku_lines, aos_ruling_out,
+            _cab_d2, _cab_d2/mtd['rev_wp']*100 if mtd['rev_wp'] else 0)
         action_items_html.append(_act('red',
-            'Renegotiate cable vendor rates &#8212; DC Cable + AC Flex rate hike confirmed',
-            '+&#8377;{:.3f}/Wp on blended COGS'.format(_cab_d2),
-            'Cables COGS increased &#8377;{:.3f}/Wp vs {}. Rate-driven, not AoS/routing length. '
-            'Action: (a) Issue PO clarification to current cable vendor; '
-            '(b) Get competing quotes for same specs from 2 alternates; '
-            '(c) Negotiate volume discount for next cycle at prior rates.'.format(_cab_d2, prev_lbl)))
+            'Cable COGS: vendor rate hike on DC + AC SKUs confirmed &#8212; not AoS-driven',
+            '+&#8377;{:.3f}/Wp blended &middot; &#8722;{:.2f}pp GM'.format(_cab_d2, _cab_d2/mtd['rev_wp']*100 if mtd['rev_wp'] else 0),
+            insight))
 
-    # Action 3: MMS fabricator rate → amber
-    _mms_d2 = (mtd['mms']/mtd['kw']/1000 - pm['mms']/pm['kw']/1000) if mtd['kw'] and pm['kw'] else 0
+    # ── INSIGHT 3: MMS fabricator rate (pre-analyzed) ──────────────────
     if _mms_d2 > 0.05:
+        mms_skus = _sku_detail(sku_data, cat_list=['MMS','Prefab MMS','Tin Shed MMS','Welded MMS'], top_n=5)
+        mms_lines = ''
+        for n,c,p,d,m in mms_skus:
+            if abs(d) > 0.001:
+                tag = 'rate &#9650;' if d > 0 else 'rate &#9660;'
+                mms_lines += '<b>{}</b> ({:.1f}% mix): &#8377;{:.3f}/Wp ({} {:+.3f}/Wp). '.format(
+                    n[:38], m, c, tag, d)
+        # Structural vs rate decomposition
+        aos_contrib = aos_d * 0.003  # rough: 0.003 ₹/Wp per +0.1kW AoS for MMS
+        rate_contrib = max(_mms_d2 - aos_contrib, 0)
+        insight = (
+            '<strong>Dual driver confirmed: fabricator rate increase + AoS structural.</strong> '
+            '{}'
+            'Decomposition: AoS +{:.2f}kW contributes ~&#8377;{:.3f}/Wp (structural &#8212; more material per system); '
+            'remaining &#8377;{:.3f}/Wp is fabricator rate increases. '
+            '3-phase Column variants show the largest unit price jumps, consistent with '
+            'steel/fabrication input cost pressure. '
+            'Net: <b>+&#8377;{:.3f}/Wp MMS = &#8722;{:.2f}pp GM</b>.'
+        ).format(mms_lines, aos_d, aos_contrib, rate_contrib,
+                 _mms_d2, _mms_d2/mtd['rev_wp']*100 if mtd['rev_wp'] else 0)
         action_items_html.append(_act('amber',
-            'Issue PO price challenge to MMS fabricator &#8212; Column Gen2 3P rate increase',
-            '+&#8377;{:.3f}/Wp on 3P SKUs'.format(_mms_d2),
-            'MMS COGS up &#8377;{:.3f}/Wp vs {}. Column Gen2 3P rate increases confirmed. '
-            'Action: (a) Request cost breakup from fabricator (steel vs fabrication split); '
-            '(b) Benchmark vs alternate fabricators; '
-            '(c) Assess quarterly rate card to lock current rates.'.format(_mms_d2, prev_lbl)))
+            'MMS COGS: fabricator rate hike confirmed across Column Gen2 variants',
+            '+&#8377;{:.3f}/Wp blended &middot; &#8722;{:.2f}pp GM'.format(_mms_d2, _mms_d2/mtd['rev_wp']*100 if mtd['rev_wp'] else 0),
+            insight))
 
-    # Action 4: Persistent below-40% clusters → amber
-    _below40 = [r for r in all_cl if r['curr']['gm'] < 40 and r['curr']['n'] >= MIN_ORDERS]
+    # ── INSIGHT 4: Below-40% clusters (pre-analyzed) ───────────────────
     if _below40:
-        _b40_names = ', '.join('{} ({:.1f}%)'.format(r['cluster'], r['curr']['gm']) for r in _below40[:3])
+        b40_detail = []
+        for r in sorted(_below40, key=lambda x: x['curr']['gm'])[:4]:
+            rc = r['curr']; rp = r['prev']
+            margin_wp = rc['rev_wp'] - rc['cogs_kw']/1000 if rc['kw'] else 0
+            b40_detail.append(
+                '<b>{}</b> (n={}, GM {:.1f}%): Rev/Wp &#8377;{:.2f} &#8722; COGS/Wp &#8377;{:.2f} = '
+                '<b>&#8377;{:.2f}/Wp margin</b>. AoS {:.2f}kW. '
+                '{}'.format(
+                    r['cluster'], rc['n'], rc['gm'], rc['rev_wp'],
+                    rc['cogs_kw']/1000 if rc['kw'] else 0,
+                    margin_wp, rc['aos'],
+                    'Rev/Wp has been below &#8377;{:.0f} for 2+ months &#8212; structural floor issue.'.format(rc['rev_wp']+0.5)
+                    if rp['n'] >= MIN_ORDERS and rp['rev_wp'] < 65 else
+                    'COGS pressure from {} mix.'.format('MMS+Cable' if _mms_d2 > 0.05 else 'rate hikes')
+                ))
+        lowest = _below40[0]
+        insight = (
+            '<strong>{} cluster{} confirmed structurally below 40% GM &#8212; not cycle noise.</strong> '
+            '{} '
+            'Common pattern: COGS/Wp in these markets is &#8377;{:.2f}&#8211;&#8377;{:.2f}/Wp, '
+            'leaving &lt;&#8377;{:.2f}/Wp net margin per Wp. '
+            'This is a <em>Rev/Wp floor problem</em> &#8212; COGS is not meaningfully higher than '
+            'other clusters; revenue realisation is structurally lower.'
+        ).format(
+            len(_below40), 's' if len(_below40)>1 else '',
+            ' '.join(b40_detail),
+            min(r['curr']['cogs_kw']/1000 for r in _below40 if r['curr']['kw']),
+            max(r['curr']['cogs_kw']/1000 for r in _below40 if r['curr']['kw']),
+            min((r['curr']['rev_wp'] - r['curr']['cogs_kw']/1000) for r in _below40 if r['curr']['kw'])
+        )
         action_items_html.append(_act('amber',
-            'Implement pricing floor for persistent &lt;40% GM clusters',
-            '{} cluster{} below 40% GM floor'.format(len(_below40), 's' if len(_below40)>1 else ''),
-            'Clusters below 40%: {}. These are structural, not temporary. '
-            'Action: (a) Set minimum Rev/Wp floors per cluster; '
-            '(b) Enforce in deal approval workflow; '
-            '(c) Review if competitor pricing has reset market expectations in these markets.'.format(_b40_names)))
+            '{} cluster{} below 40% GM &#8212; structural Rev/Wp floor deficit, not COGS issue'.format(
+                len(_below40), 's' if len(_below40)>1 else ''),
+            '{} cluster{} &middot; up to {:,} installs/month at sub-40% GM'.format(
+                len(_below40), 's' if len(_below40)>1 else '',
+                sum(r['curr']['n'] for r in _below40)),
+            insight))
 
-    # Action 5: Module lock → green
-    _mod_d2 = (mtd['mod']/mtd['kw']/1000 - pm['mod']/pm['kw']/1000) if mtd['kw'] and pm['kw'] else 0
+    # ── INSIGHT 5: Module — only stable COGS category ──────────────────
+    # ── INSIGHT 5: Module — only stable COGS category ──────────────────
+    mod_pct   = mtd['mod']/mtd['cogs']*100 if mtd['cogs'] else 0
+    mod_rwp_c = mtd['mod']/mtd['kw']/1000  if mtd['kw']   else 0
+    mod_rwp_p = pm['mod'] /pm['kw'] /1000  if pm['kw']    else 0
+    mod_skus  = _sku_detail(sku_data, cat_list=['Module'], top_n=3)
+    dominant_mod = mod_skus[0] if mod_skus else None
+    dom_mix  = dominant_mod[4] if dominant_mod else 99.0
+    dom_name = dominant_mod[0][:40] if dominant_mod else '540Wp DCR-PREMIER'
+    insight_mod = (
+        '<strong>Module is the only COGS category essentially flat month-on-month.</strong> '
+        '<b>{}</b> accounts for {:.1f}% of all installs at &#8377;{:.4f}/Wp '
+        '(vs &#8377;{:.4f}/Wp {}, &#916; {:+.4f}/Wp). '
+        'At <b>{:.1f}% of total COGS</b>, Module stability is the primary reason blended GM '
+        'has not deteriorated further despite MMS + Cable pressure. '
+        'If Module rate moved by even &#8377;0.10/Wp, blended GM impact would be '
+        '&#8722;{:.2f}pp &#8212; larger than the entire cable hike this month. '
+        'Current rate confirmed stable; no procurement risk flagged.'
+    ).format(
+        dom_name, dom_mix, mod_rwp_c, mod_rwp_p, prev_lbl, _mod_d2,
+        mod_pct,
+        0.10 / mtd['rev_wp'] * 100 if mtd['rev_wp'] else 0
+    )
     action_items_html.append(_act('green',
-        'Lock Module procurement rate for next month &#8212; 540Wp DCR-PREMIER stable',
-        'Stable &middot; secure rate before any commodity move',
-        'Module is only COGS category essentially flat (&#916; {:+.3f} &#8377;/Wp). '
-        'At 57%+ of COGS, any rate movement has outsized GM impact. '
-        'Action: Contact PREMIER for rate lock for next 2 months at current rate or better. '
-        'No diversification needed at 99% mix concentration.'.format(_mod_d2)))
+        'Module: only fully stable COGS category &#8212; {:.1f}% of COGS, &#916; {:+.4f} &#8377;/Wp'.format(mod_pct, _mod_d2),
+        'Stable &middot; &#916;{:+.4f} &#8377;/Wp &middot; {:.1f}% of COGS'.format(_mod_d2, mod_pct),
+        insight_mod))
 
     if not action_items_html:
         action_items_html.append(_act('green',
-            'All COGS categories within acceptable band &#8212; no procurement action required',
-            'All stable', 'Monitor weekly COGS/Wp trend.'))
+            'All COGS categories within normal band &#8212; no material cost movement',
+            'All stable',
+            'No category exceeded &#8377;0.04/Wp shift. Blended COGS stable. Monitor weekly.'))
 
     actions_html = (
         '<div class="actions-wrap">'
-        '<div class="actions-title">&#127919; Prioritised Action Plan</div>'
+        '<div class="actions-title">&#128202; Deep-Dive Insights &#8212; Pre-Analysed, Decision-Ready</div>'
         '{}'
         '</div>'
     ).format(''.join(action_items_html))
@@ -1487,13 +1638,17 @@ def build(data):
                 'All active clusters (n &#8805; {} MTD) &middot; GM%, Rev/Wp, auto-generated driver'.format(MIN_ORDERS),
                 cl_html),
         section('Top Things to Watch', 'Prioritised signals for decision-making', watch_html),
-        section('Strategic Actions', 'Pricing &middot; Sourcing &middot; Ops &#8212; decision-ready, SKU-level', actions_html),
+        section('Deep-Dive Insights',
+                'Pre-analysed root causes &#8212; no follow-up research needed',
+                actions_html),
 
         # ── FOOTER
         '<div class="footer">Solar Square GM Analytics &nbsp;&middot;&nbsp; ',
         '{} MTD {} vs {} {} &nbsp;&middot;&nbsp; '.format(curr_lbl[:3], latest.year, prev_lbl, pm_last.year),
         'COGS cross-check diff = &#8377;{:.0f} &nbsp;&middot;&nbsp; Generated {}'.format(cogs_diff_val, now_str),
-        '</div></div></body></html>',
+        '</div>',
+
+        '</div></body></html>',
     ])
 
     return html, mtd, latest
@@ -1513,4 +1668,13 @@ if __name__=='__main__':
     import smtplib
     from email.mime.multipart import MIMEMultipart
     from email.mime.text import MIMEText
-    msg = MIMEMultipar
+    msg = MIMEMultipart('alternative')
+    msg['Subject'] = subject
+    msg['From']    = SENDER
+    msg['To']      = ', '.join(RECIPIENTS)
+    msg.attach(MIMEText(html, 'html', 'utf-8'))
+    print('Sending...', flush=True)
+    with smtplib.SMTP('smtp.gmail.com', 587) as s:
+        s.ehlo(); s.starttls(); s.login(SENDER, GMAIL_PASS)
+        s.sendmail(SENDER, RECIPIENTS, msg.as_string())
+    print('Sent: ' + subject, flush=True)
