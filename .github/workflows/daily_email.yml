@@ -5,8 +5,8 @@ on:
   workflow_dispatch:
 
   # Daily at 8:30 AM IST = 03:00 UTC
-  schedule:
-    - cron: '0 3 * * 1-6'   # Mon–Sat; change to * for all 7 days
+schedule:
+  - cron: '0 3 * * *'   # Mon–Sun; change to * for all 7 days
 
   # Also fire automatically after the data sync workflow completes
   workflow_run:
