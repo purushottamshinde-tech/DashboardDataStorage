@@ -579,11 +579,11 @@ body{
 .group-row.stable td{background:#1E3A5F;color:#BFDBFE;border-top:2px solid #1E3A5F}
 .group-row.nascent td{background:#3B1FA8;color:#DDD6FE;border-top:2px solid #3B1FA8}
 
-/* GM% cells — 4-tier colour scale (high contrast) */
-.gm-cell-hi  {background:#059669;color:#fff;font-weight:800;text-align:center;padding:9px 12px;font-family:'DM Mono',monospace;font-size:12px}
-.gm-cell-mid {background:#D97706;color:#fff;font-weight:800;text-align:center;padding:9px 12px;font-family:'DM Mono',monospace;font-size:12px}
-.gm-cell-lo  {background:#DC2626;color:#fff;font-weight:800;text-align:center;padding:9px 12px;font-family:'DM Mono',monospace;font-size:12px}
-.gm-cell-crit{background:#7C0D0D;color:#FFD0D0;font-weight:800;text-align:center;padding:9px 12px;font-family:'DM Mono',monospace;font-size:12px;letter-spacing:.5px}
+/* GM% cells — 4-tier colour scale: light bg + bold dark text = max readability */
+.gm-cell-hi  {background:#DCFCE7;color:#14532D;font-weight:900;text-align:center;padding:9px 12px;font-family:'DM Mono',monospace;font-size:13px;border-left:3px solid #16A34A}
+.gm-cell-mid {background:#FEF9C3;color:#713F12;font-weight:900;text-align:center;padding:9px 12px;font-family:'DM Mono',monospace;font-size:13px;border-left:3px solid #CA8A04}
+.gm-cell-lo  {background:#FEE2E2;color:#7F1D1D;font-weight:900;text-align:center;padding:9px 12px;font-family:'DM Mono',monospace;font-size:13px;border-left:3px solid #DC2626}
+.gm-cell-crit{background:#FEE2E2;color:#450A0A;font-weight:900;text-align:center;padding:9px 12px;font-family:'DM Mono',monospace;font-size:13px;border-left:4px solid #7F1D1D;letter-spacing:.3px}
 
 /* Cluster name + state inline */
 .cluster-name{font-weight:700;font-size:12px;display:block}
@@ -593,10 +593,10 @@ body{
 .cluster-legend{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
 .cluster-legend-label{font-size:9px;color:#6B7280;font-weight:700;text-transform:uppercase;letter-spacing:.8px;margin-right:4px}
 .leg-pill{display:inline-flex;align-items:center;gap:5px;font-size:9px;font-weight:700;padding:3px 10px;border-radius:8px}
-.leg-hi  {background:#059669;color:#fff}
-.leg-mid {background:#D97706;color:#fff}
-.leg-lo  {background:#DC2626;color:#fff}
-.leg-crit{background:#7C0D0D;color:#FFD0D0}
+.leg-hi  {background:#DCFCE7;color:#14532D;border:1px solid #16A34A}
+.leg-mid {background:#FEF9C3;color:#713F12;border:1px solid #CA8A04}
+.leg-lo  {background:#FEE2E2;color:#7F1D1D;border:1px solid #DC2626}
+.leg-crit{background:#FEE2E2;color:#450A0A;border:2px solid #7F1D1D}
 
 /* ── SKU CARDS ── */
 .sku-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
@@ -629,13 +629,25 @@ body{
 .bridge-label{font-size:8.5px;color:var(--mid);display:block;margin-bottom:2px;font-family:'DM Sans',sans-serif;white-space:nowrap}
 .bridge-val{font-size:13px;font-weight:700;display:block}
 
-/* ── KPI + TODAY TABLES ── */
-.kgrid,.today-grid{width:100%;border-collapse:separate;border-spacing:8px}
-.ec,.kc,.tc{border-radius:10px;padding:13px 15px;vertical-align:top;border:1px solid var(--border);background:var(--surface)}
-.kc-label,.tc-label{display:block;font-size:8px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#9CA3AF;margin-bottom:6px}
-.kc-val,.tc-today{font-size:22px;font-weight:900;letter-spacing:-.4px;display:block;line-height:1;margin-bottom:5px;color:#111827}
-.kc-sub,.tc-prev{font-size:10px;color:#6B7280;display:block;line-height:1.5}
-.kc-trend{display:block;margin-top:4px}
+/* ── KPI TILE GRID — 4-col desktop / 2-col mobile ── */
+.kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.kpi-tile{
+  border-radius:12px;padding:16px 18px;
+  border:1px solid var(--border);background:#fff;
+  display:flex;flex-direction:column;gap:4px;
+}
+.kpi-label{font-size:8px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:#94A3B8}
+.kpi-val{font-size:26px;font-weight:900;letter-spacing:-.6px;line-height:1.1;color:#0F172A}
+.kpi-sub{font-size:10.5px;color:#64748B;line-height:1.4}
+.kpi-trend{font-size:10.5px;font-weight:700;margin-top:2px}
+.kpi-trend.up{color:#059669}.kpi-trend.dn{color:#DC2626}.kpi-trend.neu{color:#94A3B8}
+
+/* ── TODAY TABLES (kept as-is) ── */
+.today-grid{width:100%;border-collapse:separate;border-spacing:8px}
+.tc{border-radius:10px;padding:13px 15px;vertical-align:top;border:1px solid var(--border);background:var(--surface)}
+.tc-label{display:block;font-size:8px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#9CA3AF;margin-bottom:6px}
+.tc-today{font-size:22px;font-weight:900;letter-spacing:-.4px;display:block;line-height:1;margin-bottom:5px;color:#111827}
+.tc-prev{font-size:10px;color:#6B7280;display:block;line-height:1.5}
 
 /* ── PRODUCT MIX BAR ── */
 .mix-bar{height:24px;border-radius:8px;overflow:hidden;display:flex;margin-bottom:12px;gap:1px}
@@ -665,11 +677,14 @@ body{
   .snap-card{padding:12px 12px}
   /* 1-col sku grid */
   .sku-grid{grid-template-columns:1fr}
-  /* kpi tables → 2-col block */
-  .kgrid,.kgrid tbody,.kgrid tr,
+  /* kpi tile grid → 2-col on mobile */
+  .kpi-grid{grid-template-columns:1fr 1fr;gap:8px}
+  .kpi-val{font-size:20px}
+  .kpi-tile{padding:12px 13px}
+  /* today table → 2-col block */
   .today-grid,.today-grid tbody,.today-grid tr{display:block!important;width:100%!important}
-  .kc,.tc{display:inline-block!important;width:calc(50% - 10px)!important;margin:4px!important;vertical-align:top;padding:10px 10px!important}
-  .kc-val,.tc-today{font-size:17px!important}
+  .tc{display:inline-block!important;width:calc(50% - 10px)!important;margin:4px!important;vertical-align:top;padding:10px 10px!important}
+  .tc-today{font-size:17px!important}
 
   .driver-chip{max-width:100%;font-size:9px}
   .cluster-legend{gap:5px}
@@ -912,7 +927,7 @@ def build(data):
         bridge_items.append(_bridge_item('Module/Other', _mod_oth_impact))
     bridge_html = (
         '<div style="margin-top:18px">'
-        '<div class="sec-title" style="margin-bottom:10px">GM Bridge &#8212; {} MTD vs {} {}</div>'
+        '<div class="sec-title" style="margin-bottom:10px;margin-top:20px">GM Bridge &#8212; {} MTD vs {} {}</div>'
         '<div class="bridge-scroll"><div class="bridge">'
         '<div class="bridge-box start"><span class="bridge-label">{} GM</span>'
         '<span class="bridge-val">{:.2f}%</span></div>'
@@ -927,49 +942,95 @@ def build(data):
     ).format(curr_lbl, prev_lbl, latest.year, prev_lbl, pm['gm'],
              ''.join(bridge_items), curr_lbl[:3], mtd['gm'])
 
-    snap4_html = snap_grid_html + bridge_html
+    # snap4_html removed — Exec Snapshot section dropped
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    #  MTD KPI GRID (2 rows x 4)
+    #  MTD TILE GRID (2 rows x 4, mobile-first)
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    def kcard(label, val, sub, vc='#111827', trend_html=''):
+    def _trend_cls(delta, higher_better=True):
+        if abs(delta) < 0.01: return 'neu', '&#8212;'
+        positive = (delta > 0) == higher_better
+        arrow = '&#9650;' if delta > 0 else '&#9660;'
+        return ('up' if positive else 'dn'), arrow
+
+    def ktile(label, val, sub, val_color='#0F172A', trend_txt='', trend_cls='neu', accent=''):
+        border = 'border-left:3px solid {};'.format(accent) if accent else ''
         return (
-            '<td class="kc">'
-            '<span class="kc-label">{}</span>'
-            '<span class="kc-val" style="color:{}">{}</span>'
-            '<span class="kc-sub">{}</span>'
-            '<span class="kc-trend">{}</span>'
-            '</td>'
-        ).format(label, vc, val, sub, trend_html)
+            '<div class="kpi-tile" style="{}">'
+            '<span class="kpi-label">{}</span>'
+            '<span class="kpi-val" style="color:{}">{}</span>'
+            '<span class="kpi-sub">{}</span>'
+            '<span class="kpi-trend {}">{}</span>'
+            '</div>'
+        ).format(border, label, val_color, val, sub, trend_cls, trend_txt)
+
+    # Row 1: Volume · kW · GM% · Revenue
+    _vol_d = mtd['n'] - pm['n']
+    _vol_cls, _vol_arr = _trend_cls(_vol_d)
+    _vol_pct_s = '{}{:.0f}%'.format('+' if vol_pct>=0 else '', vol_pct)
+    t_vol = ktile('Installations MTD',
+        '{:,}'.format(mtd['n']),
+        'vs {:,} {} (same {} days)'.format(pm['n'], prev_lbl, pm_day),
+        trend_txt='{} {} MoM'.format(_vol_arr, _vol_pct_s), trend_cls=_vol_cls)
+
+    _kw_d = mtd['kw'] - pm['kw']
+    _kw_pct = (_kw_d/pm['kw']*100) if pm['kw'] else 0
+    _kw_cls, _kw_arr = _trend_cls(_kw_d)
+    t_kw = ktile('kW Installed MTD',
+        '{:,.0f} kW'.format(mtd['kw']),
+        'vs {:,.0f} kW {}'.format(pm['kw'], prev_lbl),
+        trend_txt='{} {:+.0f}%'.format(_kw_arr, _kw_pct), trend_cls=_kw_cls)
+
+    _gm_cls, _gm_arr = _trend_cls(gm_trend)
+    _adj_str = ' &middot; Adj {:.2f}%'.format(mtd['adj_gm']) if mtd.get('adj_gm') else ''
+    _gm_accent = '#16A34A' if mtd['gm']>=44 else ('#CA8A04' if mtd['gm']>=42 else '#DC2626')
+    t_gm = ktile('GM % MTD',
+        '{:.2f}%'.format(mtd['gm']),
+        'vs {:.2f}% {}{}'.format(pm['gm'], prev_lbl, _adj_str),
+        val_color=gmc(mtd['gm']),
+        trend_txt='{} {:+.2f}pp'.format(_gm_arr, gm_trend), trend_cls=_gm_cls,
+        accent=_gm_accent)
+
+    _rev_d_pct = (mtd['rev']-pm['rev'])/pm['rev']*100 if pm['rev'] else 0
+    _rev_cls, _rev_arr = _trend_cls(_rev_d_pct)
+    t_rev = ktile('Revenue MTD',
+        fc(mtd['rev']),
+        'vs {} {}'.format(fc(pm['rev']), prev_lbl),
+        trend_txt='{} {:+.0f}%'.format(_rev_arr, _rev_d_pct), trend_cls=_rev_cls)
+
+    # Row 2: AoS · AoV · Rev/Wp · Abs GM
+    _aos_d = mtd['aos'] - pm['aos']
+    _aos_cls, _aos_arr = _trend_cls(_aos_d)
+    t_aos = ktile('Avg System Size',
+        '{:.2f} kW'.format(mtd['aos']),
+        'vs {:.2f} kW {}'.format(pm['aos'], prev_lbl),
+        trend_txt='{} {:+.2f}kW'.format(_aos_arr, _aos_d), trend_cls=_aos_cls)
+
+    _aov_d_pct = (mtd['aov']-pm['aov'])/pm['aov']*100 if pm['aov'] else 0
+    _aov_cls, _aov_arr = _trend_cls(_aov_d_pct)
+    t_aov = ktile('Avg Order Value',
+        fc(mtd['aov']),
+        'vs {} {}'.format(fc(pm['aov']), prev_lbl),
+        trend_txt='{} {:+.0f}%'.format(_aov_arr, _aov_d_pct), trend_cls=_aov_cls)
+
+    _rwp_cls, _rwp_arr = _trend_cls(rev_wp_d)
+    t_rwp = ktile('Rev / Wp',
+        '&#8377;{:.2f}'.format(mtd['rev_wp']),
+        'vs &#8377;{:.2f} {}'.format(pm['rev_wp'], prev_lbl),
+        trend_txt='{} {:+.2f}/Wp'.format(_rwp_arr, rev_wp_d), trend_cls=_rwp_cls)
+
+    _agm_d_pct = (mtd['abs_gm']-pm['abs_gm'])/pm['abs_gm']*100 if pm['abs_gm'] else 0
+    _agm_cls, _agm_arr = _trend_cls(_agm_d_pct)
+    t_agm = ktile('Abs Gross Margin',
+        fc(mtd['abs_gm']),
+        'vs {} {}'.format(fc(pm['abs_gm']), prev_lbl),
+        trend_txt='{} {:+.0f}%'.format(_agm_arr, _agm_d_pct), trend_cls=_agm_cls)
 
     kpi_html = (
-        '<table class="kgrid"><tr>'
-        + kcard('Installations MTD', '{:,}'.format(mtd['n']),
-                'vs {:,} {} (1&#8211;{})'.format(pm['n'], prev_lbl, pm_day),
-                trend_html=dpct(mtd['n'], pm['n']))
-        + kcard('kW Installed MTD', '{:,.0f} kW'.format(mtd['kw']),
-                'vs {:,.0f} kW {}'.format(pm['kw'], prev_lbl),
-                trend_html=dpct(mtd['kw'], pm['kw']))
-        + kcard('Gross Margin', '{:.2f}%'.format(mtd['gm']),
-                'vs {:.2f}% {}'.format(pm['gm'], prev_lbl),
-                vc=gmc(mtd['gm']), trend_html=dpp(gm_trend))
-        + kcard('Revenue MTD', fc(mtd['rev']),
-                'vs {} {}'.format(fc(pm['rev']), prev_lbl),
-                trend_html=dpct(mtd['rev'], pm['rev']))
-        + '</tr><tr>'
-        + kcard('Avg System Size', '{:.2f} kW'.format(mtd['aos']),
-                'vs {:.2f} kW {}'.format(pm['aos'], prev_lbl),
-                trend_html=dpval(mtd['aos']-pm['aos'], 'kW'))
-        + kcard('Avg Order Value', fc(mtd['aov']),
-                'vs {} {}'.format(fc(pm['aov']), prev_lbl),
-                trend_html=dpct(mtd['aov'], pm['aov']))
-        + kcard('Rev / Wp', '&#8377;{:.2f}'.format(mtd['rev_wp']),
-                'vs &#8377;{:.2f} {}'.format(pm['rev_wp'], prev_lbl),
-                trend_html=dpval(rev_wp_d, '&#8377;/Wp'))
-        + kcard('Abs Gross Margin', fc(mtd['abs_gm']),
-                'vs {} {}'.format(fc(pm['abs_gm']), prev_lbl),
-                trend_html=dpct(mtd['abs_gm'], pm['abs_gm']))
-        + '</tr></table>'
+        '<div class="kpi-grid">'
+        + t_vol + t_kw + t_gm + t_rev
+        + t_aos + t_aov + t_rwp + t_agm
+        + '</div>'
     )
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1318,8 +1379,7 @@ def build(data):
         '</div></div>',
 
         # ── SECTIONS
-        section('Exec Snapshot', '{} MTD vs full {}'.format(curr_lbl[:3], prev_lbl), snap4_html),
-        section('MTD Dashboard', 'Revenue &middot; Margin &middot; Cost &middot; Volume vs full ' + prev_lbl, kpi_html),
+        section('MTD at a Glance', '{} MTD vs full {} (same {} days)'.format(curr_lbl, prev_lbl, pm_day), kpi_html + bridge_html),
         section('Today at a Glance', '{} vs {}'.format(lat_lbl, prv_lbl), today_html),
         section('Product Mix', 'Offer-type split MTD vs full {} &#8212; installs, GM%, Rev/Wp'.format(prev_lbl), mix_html),
         section('COGS Analysis',
