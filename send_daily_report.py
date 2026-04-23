@@ -439,18 +439,12 @@ def gmcell(pct, fw='600'):
 #  PREMIUM CSS
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 CSS = """
-/* ══════════════════════════════════════════════════════
-   SOLAR SQUARE GM REPORT  — MOBILE-FIRST EMAIL CSS
-   Sky-blue header · 2-col KPI tiles · No breaks
-   ══════════════════════════════════════════════════════ */
 
-/* ── RESET ── */
 *{box-sizing:border-box;margin:0;padding:0}
 html{-webkit-text-size-adjust:100%}
 
-/* ── PAGE ── */
 body{
-  font-family:Arial,Helvetica,sans-serif;
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,Helvetica,sans-serif;
   background:#E8F4FD;
   color:#1A1A2E;font-size:14px;line-height:1.55;
   padding:16px 8px 40px;
@@ -460,9 +454,6 @@ body{
   background:#E8F4FD;
 }
 
-/* ══════════════════════════════════════════════════════
-   HEADER  — sky blue
-   ══════════════════════════════════════════════════════ */
 .header{
   background:linear-gradient(135deg,#0284C7 0%,#0EA5E9 55%,#38BDF8 100%);
   border-radius:14px 14px 0 0;
@@ -497,9 +488,6 @@ body{
 .badge.hi {background:rgba(5,150,105,.35);border-color:rgba(16,185,129,.50);color:#D1FAE5}
 .badge.warn{background:rgba(127,29,29,.40);border-color:rgba(252,165,165,.45);color:#FEE2E2}
 
-/* ══════════════════════════════════════════════════════
-   SECTION WRAPPER
-   ══════════════════════════════════════════════════════ */
 .section{
   background:#fff;
   border:1px solid #DBEAFE;
@@ -524,14 +512,9 @@ body{
   margin-top:4px;font-style:italic;
 }
 
-/* ══════════════════════════════════════════════════════
-   KPI TILES  — 2×2 table-based grid, 2 cards per row
-   Uses <table> with 2 <td class="kc"> per row
-   Inline border-top accent on each td
-   ══════════════════════════════════════════════════════ */
 .kgrid{
   width:100%;border-collapse:separate;border-spacing:8px;
-  margin:-8px;          /* offset border-spacing so edge aligns */
+  margin:-8px;
 }
 .kc{
   width:50%;
@@ -554,9 +537,6 @@ body{
 }
 .kc-trend{display:block;margin-top:5px;font-size:11px;font-weight:700}
 
-/* ══════════════════════════════════════════════════════
-   TODAY GRID — 2-col same pattern
-   ══════════════════════════════════════════════════════ */
 .today-grid{
   width:100%;border-collapse:separate;border-spacing:8px;
   margin:-8px;
@@ -579,9 +559,6 @@ body{
 }
 .tc-prev{display:block;font-size:10px;color:#64748B;line-height:1.4}
 
-/* ══════════════════════════════════════════════════════
-   DATA TABLE  — horizontal scroll on mobile
-   ══════════════════════════════════════════════════════ */
 .table-scroll{
   width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;
   border-radius:8px;border:1px solid #DBEAFE;
@@ -616,15 +593,11 @@ body{
 .neutral{color:#94A3B8}
 .up-good{color:#059669;font-weight:700}
 
-/* total row */
 .data-table tr.total-row td{
   background:#EFF6FF!important;font-weight:700;
   border-top:2px solid #BFDBFE;
 }
 
-/* ══════════════════════════════════════════════════════
-   COGS SKU CARDS — 2×2 grid on both mobile and desktop
-   ══════════════════════════════════════════════════════ */
 .sku-grid{
   display:grid;
   grid-template-columns:1fr 1fr;
@@ -658,9 +631,10 @@ body{
   padding:1px 7px;border-radius:6px;margin-left:5px;
 }
 
-/* ══════════════════════════════════════════════════════
-   CLUSTER TABLE
-   ══════════════════════════════════════════════════════ */
+.cogs-wrap{margin:0}
+.cogs-wrap .data-table{min-width:400px;font-size:13px}
+.cogs-wrap .data-table th{font-size:9px;padding:9px 11px}
+.cogs-wrap .data-table td{padding:10px 11px;font-size:13px}
 .cluster-wrap{
   overflow-x:auto;-webkit-overflow-scrolling:touch;
   border-radius:8px;border:1px solid #DBEAFE;
@@ -677,7 +651,6 @@ body{
 .gm-cell-mid{background:#FEF9C3;color:#92400E;font-weight:800;text-align:center;padding:8px 10px}
 .gm-cell-lo {background:#FEE2E2;color:#B91C1C;font-weight:800;text-align:center;padding:8px 10px}
 
-/* ── DRIVER CHIPS ── */
 .driver-chip{
   font-size:9.5px;color:#334155;
   line-height:1.75;white-space:normal;
@@ -693,9 +666,6 @@ body{
 .tag-ok   {background:#DCFCE7;color:#166534;border:1px solid #BBF7D0}
 .tag-price{background:#EDE9FE;color:#5B21B6;border:1px solid #DDD6FE}
 
-/* ══════════════════════════════════════════════════════
-   WATCH LIST
-   ══════════════════════════════════════════════════════ */
 .watch-list{border:1px solid #DBEAFE;border-radius:10px;overflow:hidden}
 .watch-item{
   display:flex;gap:12px;align-items:flex-start;
@@ -729,9 +699,6 @@ body{
   line-height:1.65;word-break:break-word;
 }
 
-/* ══════════════════════════════════════════════════════
-   GM BRIDGE  — horizontal scroll
-   ══════════════════════════════════════════════════════ */
 .bridge-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:4px}
 .bridge{
   display:flex;align-items:stretch;flex-wrap:nowrap;
@@ -754,17 +721,11 @@ body{
 }
 .bridge-val{font-size:13px;font-weight:700;display:block}
 
-/* ══════════════════════════════════════════════════════
-   PRODUCT MIX BAR
-   ══════════════════════════════════════════════════════ */
 .mix-bar{
   height:24px;border-radius:8px;overflow:hidden;
   display:flex;margin-bottom:12px;gap:2px;
 }
 
-/* ══════════════════════════════════════════════════════
-   FOOTER
-   ══════════════════════════════════════════════════════ */
 .footer{
   background:#EFF6FF;border:1px solid #BFDBFE;
   border-top:2px solid #7DD3FC;
@@ -773,10 +734,6 @@ body{
   font-size:9px;color:#64748B;letter-spacing:.3px;
 }
 
-/* ══════════════════════════════════════════════════════
-   MOBILE  ≤ 600px
-   All grids collapse to 1-col or 2-col where specified
-   ══════════════════════════════════════════════════════ */
 @media screen and (max-width:600px){
   body{padding:8px 6px 32px;font-size:13px}
   .page{max-width:100%}
@@ -788,33 +745,34 @@ body{
 
   .section{padding:14px 12px}
 
-  /* KPI tiles — keep 2 per row, just tighter */
   .kgrid{border-spacing:6px;margin:-6px}
   .kc{padding:11px 11px 9px}
   .kc-val{font-size:17px}
   .kc-sub{font-size:9.5px}
 
-  /* Today tiles — keep 2 per row */
   .today-grid{border-spacing:6px;margin:-6px}
   .tc{padding:11px 11px 9px}
   .tc-today{font-size:17px}
   .tc-prev{font-size:9.5px}
 
-  /* SKU grid — 2 per row, slightly smaller */
   .sku-grid{gap:8px}
   .sku-cat{font-size:11px}
   .sku-line{font-size:9.5px}
   .sku-rc{font-size:8.5px}
 
-  /* Cluster driver column narrow */
   .driver-chip{max-width:140px;font-size:9px}
 
-  /* Watch list */
   .watch-item{padding:11px 11px;gap:9px}
   .watch-title{font-size:11.5px}
   .watch-why{font-size:10px}
 
   .footer{padding:10px 12px;font-size:8px}
+
+  /* COGS table — larger, clearer on mobile */
+  .cogs-wrap .data-table{min-width:360px;font-size:12px}
+  .cogs-wrap .data-table th{font-size:9px;padding:8px 9px}
+  .cogs-wrap .data-table td{padding:9px 9px;font-size:12px}
+  .cogs-wrap .data-table td.mono{font-size:11.5px}
 }
 """
 
@@ -1197,11 +1155,11 @@ def build(data):
         pkw_d_wp = (pkw_c - pkw_p) / 1000
         # delta styling
         if pkw_d_wp > 0.005:
-            delta_html = '<span class="up">{:+.4f}</span>'.format(pkw_d_wp)
+            delta_html = '<span class="up">{:+.2f}</span>'.format(pkw_d_wp)
         elif pkw_d_wp < -0.005:
-            delta_html = '<span class="dn">{:.4f}</span>'.format(pkw_d_wp)
+            delta_html = '<span class="dn">{:.2f}</span>'.format(pkw_d_wp)
         else:
-            delta_html = '<span class="neutral">{:+.4f}</span>'.format(pkw_d_wp)
+            delta_html = '<span class="neutral">{:+.2f}</span>'.format(pkw_d_wp)
         # root cause tag
         if d_pp > 0.2:
             if lbl in ('MMS','Cables') and aos_d > 0.1 and pkw_d_wp < 0.05:
@@ -1221,8 +1179,8 @@ def build(data):
             '<td><span class="dot" style="background:{}"></span><strong>{}</strong></td>'
             '<td class="R">{}</td>'
             '<td class="R">{:.2f}%</td>'
-            '<td class="R mono">{:.4f}</td>'
-            '<td class="R mono">{:.4f}</td>'
+            '<td class="R mono">{:.2f}</td>'
+            '<td class="R mono">{:.2f}</td>'
             '<td class="R">{}</td>'
             '<td class="R">{}</td>'
             '</tr>'
@@ -1231,19 +1189,18 @@ def build(data):
     tc_c = (mtd['cogs']/mtd['kw']/1000) if mtd['kw'] else 0
     tc_p = (pm['cogs']/pm['kw']/1000) if pm['kw'] else 0
     tc_d = tc_c - tc_p
-    tc_delta = '<span class="up"><strong>{:+.4f}</strong></span>'.format(tc_d) if tc_d > 0.005 else '<span class="dn">{:.4f}</span>'.format(tc_d)
-    cgs_diff_note = '&#10004; sum verified, diff=&#8377;0'
+    tc_delta = '<span class="up"><strong>{:+.2f}</strong></span>'.format(tc_d) if tc_d > 0.005 else '<span class="dn">{:.2f}</span>'.format(tc_d)
     cg_rows += (
         '<tr class="total-row">'
         '<td><strong>TOTAL COGS</strong></td>'
         '<td class="R">{}</td>'
         '<td class="R">100%</td>'
-        '<td class="R mono">{:.4f}</td>'
-        '<td class="R mono">{:.4f}</td>'
+        '<td class="R mono">{:.2f}</td>'
+        '<td class="R mono">{:.2f}</td>'
         '<td class="R">{}</td>'
-        '<td class="R" style="font-size:10px;color:#6B7280">{}</td>'
+        '<td class="R"></td>'
         '</tr>'
-    ).format(fc(mtd['cogs']), tc_c, tc_p, tc_delta, cgs_diff_note)
+    ).format(fc(mtd['cogs']), tc_c, tc_p, tc_delta)
 
     # Pass projects.json category ₹/Wp values so SKU card matches COGS table exactly
     _pj_cat = {
@@ -1283,7 +1240,7 @@ def build(data):
             '<div style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;'
             'padding:12px 16px;margin-top:12px;font-size:11px;color:#92400E;line-height:1.9">'
             '&#9888;&nbsp; <b>COGS shift: '
-            '<span style="color:{}">{}{:.4f} &#8377;/Wp on realised margin</span>'
+            '<span style="color:{}">{}{:.2f} &#8377;/Wp on realised margin</span>'
             '</b> &nbsp;<span style="font-weight:400;color:#B45309">({}{:.2f}%pts on GM &#64; &#8377;{:.2f}/Wp realisation)</span><br>'
             '<span style="display:block;margin-top:6px;line-height:2">{}</span>'
             '</div>'
@@ -1291,7 +1248,7 @@ def build(data):
                  '<br>'.join(parts))
 
     cogs_html = (
-        '<div class="table-scroll"><table class="data-table"><thead><tr>'
+        '<div class="cogs-wrap"><div class="table-scroll"><table class="data-table"><thead><tr>'
         '<th>Category</th>'
         '<th class="R">MTD Amount</th>'
         '<th class="R">% of COGS</th>'
@@ -1300,7 +1257,7 @@ def build(data):
         '<th class="R">&#916; &#8377;/Wp</th>'
         '<th class="R">Root Cause</th>'
         '</tr></thead><tbody>{}</tbody></table>{}'
-    ).format(prev_lbl, cg_rows, cogs_callout)
+    ).format(prev_lbl, cg_rows, cogs_callout) + '</div>'
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     #  TOP 3 THINGS TO WATCH
@@ -1409,6 +1366,7 @@ def build(data):
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     #  CLUSTER TABLE
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    mtd_gm_ref = mtd['gm']  # reference for cluster vs blended comparison
     def cl_row(r, bg=''):
         c=r['curr']; p=r['prev']
         sd=STATE_DISPLAY.get(r['state'],r['state'])
@@ -1447,6 +1405,38 @@ def build(data):
             delta_html = '<span class="up-good">&#9650; +{:.2f}pp</span>'.format(r['gm_d'])
         else:
             delta_html = '<span class="neutral">{:+.2f}pp</span>'.format(r['gm_d'])
+        # Build inline insight for this cluster
+        _rv_d = det.get('rev_wp_d', 0)
+        _ck_d = det.get('cogs_kw_d', 0) / 1000
+        _ao_d = c['aos'] - p['aos'] if p['n'] else 0
+        _ins_parts = []
+        if abs(_rv_d) > 0.3:
+            _clr = '#059669' if _rv_d >= 0 else '#DC2626'
+            _ins_parts.append(
+                'Rev/Wp <b style="color:{}">{:+.2f}/Wp</b>'.format(_clr, _rv_d)
+            )
+        if abs(_ck_d) > 0.02:
+            _clr2 = '#DC2626' if _ck_d > 0 else '#059669'
+            _ins_parts.append(
+                'COGS <b style="color:{}">{:+.2f}/Wp</b>{}'.format(
+                    _clr2, _ck_d,
+                    ' (AoS {:+.1f}kW)'.format(_ao_d) if abs(_ao_d) > 0.1 else ''
+                )
+            )
+        if abs(c['gm'] - mtd_gm_ref) > 1.5:
+            _diff = c['gm'] - mtd_gm_ref
+            _clr3 = '#059669' if _diff > 0 else '#DC2626'
+            _ins_parts.append(
+                'GM <b style="color:{}">{:.1f}%</b> ({:+.1f}pp vs avg)'.format(_clr3, c['gm'], _diff)
+            )
+        if not _ins_parts:
+            insight_cell = '<td style="font-size:10px;color:#94A3B8">Stable</td>'
+        else:
+            insight_cell = (
+                '<td style="font-size:10px;color:#334155;line-height:1.7;min-width:140px">'
+                + '<br>'.join(_ins_parts)
+                + '</td>'
+            )
         return (
             '<tr style="{}">'
             '<td style="font-weight:700">{}</td>'
@@ -1455,13 +1445,14 @@ def build(data):
             '<td class="R mono">{:.2f} / {:.2f}</td>'
             '{}'
             '<td class="R">{}</td>'
-            # driver cell removed
+            '{}'
             '</tr>'
         ).format(
             bgs, r['cluster'], sd, c['n'],
             c['rev_wp'], p['rev_wp'] if p['n'] else 0,
             gm_cell,
-            delta_html
+            delta_html,
+            insight_cell
         )
 
     cl_thead = (
@@ -1472,22 +1463,22 @@ def build(data):
         '<th class="R">Rev/Wp MTD / {}</th>'
         '<th class="R">GM%</th>'
         '<th class="R">&#916;pp</th>'
-        # driver column header removed
+        '<th>Insight</th>'
         '</tr></thead>'
     ).format(prev_lbl)
 
     cl_tbody = ''
     if declining:
-        cl_tbody += '<tr class="group-row"><td colspan="6">&#9660; Declining vs {} &#8212; needs attention</td></tr>'.format(prev_lbl)
+        cl_tbody += '<tr class="group-row"><td colspan="7">&#9660; Declining vs {} &#8212; needs attention</td></tr>'.format(prev_lbl)
         cl_tbody += ''.join(cl_row(r,'#FFFBFB') for r in declining)
     if improving:
-        cl_tbody += '<tr class="group-row"><td colspan="6">&#9650; Improving vs {}</td></tr>'.format(prev_lbl)
+        cl_tbody += '<tr class="group-row"><td colspan="7">&#9650; Improving vs {}</td></tr>'.format(prev_lbl)
         cl_tbody += ''.join(cl_row(r,'#F9FFFA') for r in improving)
     if stable_cl:
-        cl_tbody += '<tr class="group-row"><td colspan="6">&#8594; Stable (within &plusmn;0.3pp)</td></tr>'
+        cl_tbody += '<tr class="group-row"><td colspan="7">&#8594; Stable (within &plusmn;0.3pp)</td></tr>'
         cl_tbody += ''.join(cl_row(r) for r in stable_cl)
     if nascent:
-        cl_tbody += '<tr class="group-row"><td colspan="6">&#9733; New / growing clusters</td></tr>'
+        cl_tbody += '<tr class="group-row"><td colspan="7">&#9733; New / growing clusters</td></tr>'
         cl_tbody += ''.join(cl_row(r,'#FAF5FF') for r in nascent)
 
     cl_html = (
@@ -1804,8 +1795,8 @@ def build(data):
     dom_name = dominant_mod[0][:40] if dominant_mod else '540Wp DCR-PREMIER'
     insight_mod = (
         '<strong>Module is the only COGS category essentially flat month-on-month.</strong> '
-        '<b>{}</b> accounts for {:.1f}% of all installs at &#8377;{:.4f}/Wp '
-        '(vs &#8377;{:.4f}/Wp {}, &#916; {:+.4f}/Wp). '
+        '<b>{}</b> accounts for {:.1f}% of all installs at &#8377;{:.2f}/Wp '
+        '(vs &#8377;{:.2f}/Wp {}, &#916; {:+.2f}/Wp). '
         'At <b>{:.1f}% of total COGS</b>, Module stability is the primary reason blended GM '
         'has not deteriorated further despite MMS + Cable pressure. '
         'If Module rate moved by even &#8377;0.10/Wp, blended GM impact would be '
@@ -1817,8 +1808,8 @@ def build(data):
         0.10 / mtd['rev_wp'] * 100 if mtd['rev_wp'] else 0
     )
     action_items_html.append(_act('green',
-        'Module: only fully stable COGS category &#8212; {:.1f}% of COGS, &#916; {:+.4f} &#8377;/Wp'.format(mod_pct, _mod_d2),
-        'Stable &middot; &#916;{:+.4f} &#8377;/Wp &middot; {:.1f}% of COGS'.format(_mod_d2, mod_pct),
+        'Module: only fully stable COGS category &#8212; {:.1f}% of COGS, &#916; {:+.2f} &#8377;/Wp'.format(mod_pct, _mod_d2),
+        'Stable &middot; &#916;{:+.2f} &#8377;/Wp &middot; {:.1f}% of COGS'.format(_mod_d2, mod_pct),
         insight_mod))
 
     if not action_items_html:
@@ -1897,7 +1888,7 @@ def build(data):
     html = '''<!DOCTYPE html><html lang="en"><head>''' + '''
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,400;0,500;1,400&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,600;0,9..40,800;1,9..40,400&display=swap" rel="stylesheet">
+<!-- system fonts only for email -->
 <style>''' + CSS + '''</style></head><body><div class="page">''' + ''.join([
 
         # ── HEADER
@@ -1931,7 +1922,7 @@ def build(data):
         section('Product Mix', 'Offer-type split MTD vs full {}'.format(prev_lbl), mix_html),
         section('COGS Analysis', '{} MTD vs full {} &#8212; SKU-level root cause'.format(curr_lbl, prev_lbl), cogs_html),
         section('Cluster Health', 'Active clusters (n &#8805; {}) &#8212; GM%, Rev/Wp, &#916;pp'.format(MIN_ORDERS), cl_html),
-        section('Cluster Insights', 'What happened &#8212; Rev/Wp, COGS, GM vs blended avg', cluster_insights_html),
+        # Cluster Insights merged into Cluster Health table
         # Top Things to Watch removed
         # Deep-Dive Insights removed
 
