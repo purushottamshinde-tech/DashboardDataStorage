@@ -639,22 +639,29 @@ body{
   overflow-x:auto;-webkit-overflow-scrolling:touch;
   border-radius:8px;border:1px solid #DBEAFE;
 }
-.cluster-wrap .data-table{min-width:600px}
+.cluster-wrap .data-table{min-width:600px;font-size:12px}
+.cluster-wrap .data-table th{
+  font-size:8px;padding:8px 9px;white-space:nowrap;
+  color:#E0F2FE;border-bottom:2px solid #0369A1;
+}
 .cluster-wrap .data-table thead tr{background:#0284C7}
-.cluster-wrap .data-table th{color:#E0F2FE;border-bottom:2px solid #0369A1}
+.cluster-wrap .data-table td{
+  padding:9px 9px;font-size:12px;white-space:nowrap;
+}
+.cluster-wrap .data-table td.R{font-size:11.5px}
 .group-row td{
   background:#EFF6FF;color:#0369A1;
   font-weight:700;font-size:8.5px;text-transform:uppercase;
   letter-spacing:1px;padding:6px 11px;border-top:2px solid #BFDBFE;
 }
-.gm-cell-hi {background:#DCFCE7;color:#166534;font-weight:800;text-align:center;padding:8px 10px}
-.gm-cell-mid{background:#FEF9C3;color:#92400E;font-weight:800;text-align:center;padding:8px 10px}
-.gm-cell-lo {background:#FEE2E2;color:#B91C1C;font-weight:800;text-align:center;padding:8px 10px}
+.gm-cell-hi {background:#DCFCE7;color:#166534;font-weight:800;text-align:center;padding:7px 8px;font-size:12px;white-space:nowrap}
+.gm-cell-mid{background:#FEF9C3;color:#92400E;font-weight:800;text-align:center;padding:7px 8px;font-size:12px;white-space:nowrap}
+.gm-cell-lo {background:#FEE2E2;color:#B91C1C;font-weight:800;text-align:center;padding:7px 8px;font-size:12px;white-space:nowrap}
 
 .driver-chip{
   font-size:9.5px;color:#334155;
   line-height:1.75;white-space:normal;
-  word-break:break-word;max-width:220px;
+  word-break:break-word;max-width:180px;
 }
 .tag-cogs,.tag-rev,.tag-ok,.tag-price{
   display:inline-block;font-size:7.5px;font-weight:700;
@@ -1131,13 +1138,12 @@ def build(data):
             round(pct), col, lbl if pct > 8 else '')
 
     mix_html = (
-        '<div class="mix-bar">{}</div>'
         '<div class="table-scroll"><table class="data-table"><thead><tr>'
         '<th>Offer Type</th><th class="R">Installs MTD</th><th class="R">Mix%</th>'
         '<th class="R">Rev/Wp</th><th class="R">GM%</th>'
         '<th class="R">&#916;GM vs full {}</th><th class="R">&#916;Rev/Wp</th>'
         '</tr></thead><tbody>{}</tbody></table></div>'
-    ).format(mix_bar, prev_lbl, mix_rows)
+    ).format(prev_lbl, mix_rows)
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     #  COGS SECTION
@@ -1902,15 +1908,7 @@ def build(data):
             now_str
         ),
         '</div>',
-        '<div class="badges">',
-        '<span class="badge hi">&#10004; All numbers validated &amp; reconciled</span>',
-        ' <span class="badge">{:,} installs MTD</span>'.format(mtd['n']),
-        ' <span class="badge">{:,.1f} kW installed</span>'.format(mtd['kw']),
-        ' <span class="badge">GM {:.2f}%</span>'.format(mtd['gm']),
-        ' <span class="badge">Rev/Wp &#8377;{:.2f}</span>'.format(mtd['rev_wp']),
-        ' <span class="badge">AoS {:.2f} kW</span>'.format(mtd['aos']),
-        warn_badges,
-        '</div></div>',
+        '</div>',
 
         # validation banner removed
 
