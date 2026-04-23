@@ -439,411 +439,382 @@ def gmcell(pct, fw='600'):
 #  PREMIUM CSS
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 CSS = """
-/* ══════════════════════════════════════════════════════════════
-   SOLAR SQUARE GM REPORT — DESIGN SYSTEM
-   Palette: Navy ink · Emerald green · Crimson red · Amber
-   ══════════════════════════════════════════════════════════════ */
-:root{
-  --ink:#1A1A2E; --slate:#334155;
-  --green:#059669; --green-bg:#ECFDF5; --green-border:#A7F3D0;
-  --red:#DC2626;   --red-bg:#FEF2F2;   --red-border:#FECACA;
-  --amber:#D97706; --amber-bg:#FFFBEB; --amber-border:#FDE68A;
-  --blue:#2563EB;  --blue-bg:#EFF6FF;  --blue-border:#BFDBFE;
-  --mid:#64748B;   --border:#E2E8F0;   --surface:#F8FAFC;
-  --card-bg:#FFFFFF; --page-bg:#EFF2F6;
-}
+/* ══════════════════════════════════════════════════════
+   SOLAR SQUARE GM REPORT  — MOBILE-FIRST EMAIL CSS
+   Sky-blue header · 2-col KPI tiles · No breaks
+   ══════════════════════════════════════════════════════ */
+
+/* ── RESET ── */
 *{box-sizing:border-box;margin:0;padding:0}
 html{-webkit-text-size-adjust:100%}
-body{
-  font-family:'DM Sans',system-ui,-apple-system,sans-serif;
-  background:var(--page-bg);
-  color:var(--ink);font-size:13px;
-  padding:20px 12px 48px;line-height:1.5;
-}
-.page{max-width:900px;margin:0 auto}
 
-/* ── HEADER ── */
+/* ── PAGE ── */
+body{
+  font-family:Arial,Helvetica,sans-serif;
+  background:#E8F4FD;
+  color:#1A1A2E;font-size:14px;line-height:1.55;
+  padding:16px 8px 40px;
+}
+.page{
+  max-width:640px;margin:0 auto;
+  background:#E8F4FD;
+}
+
+/* ══════════════════════════════════════════════════════
+   HEADER  — sky blue
+   ══════════════════════════════════════════════════════ */
 .header{
-  background:linear-gradient(135deg,#0F172A 0%,#1E293B 60%,#1A1A2E 100%);
-  border-radius:16px 16px 0 0;padding:28px 32px 24px;
+  background:linear-gradient(135deg,#0284C7 0%,#0EA5E9 55%,#38BDF8 100%);
+  border-radius:14px 14px 0 0;
+  padding:22px 20px 18px;
   color:#fff;position:relative;overflow:hidden;
 }
 .header::before{
-  content:'';position:absolute;top:-60px;right:-60px;
-  width:240px;height:240px;border-radius:50%;
-  background:radial-gradient(circle,rgba(99,102,241,.18) 0%,transparent 70%);
-}
-.header::after{
-  content:'';position:absolute;bottom:-40px;right:100px;
-  width:160px;height:160px;border-radius:50%;
-  background:radial-gradient(circle,rgba(16,185,129,.12) 0%,transparent 70%);
+  content:'';position:absolute;top:-50px;right:-50px;
+  width:200px;height:200px;border-radius:50%;
+  background:rgba(255,255,255,.10);pointer-events:none;
 }
 .eyebrow{
-  font-family:'DM Mono',monospace;font-size:10px;letter-spacing:2.5px;
-  text-transform:uppercase;color:rgba(255,255,255,.50);margin-bottom:10px;
+  font-size:10px;letter-spacing:2px;text-transform:uppercase;
+  color:rgba(255,255,255,.75);display:block;margin-bottom:8px;
 }
 .header h1{
-  font-size:21px;font-weight:800;letter-spacing:-.3px;
-  line-height:1.25;max-width:680px;margin-bottom:8px;color:#F8FAFC;
+  font-size:18px;font-weight:700;line-height:1.3;
+  margin-bottom:6px;color:#fff;
 }
 .header-meta{
-  font-size:11px;color:rgba(255,255,255,.42);
-  font-family:'DM Mono',monospace;margin-bottom:18px;
+  font-size:10px;color:rgba(255,255,255,.55);
+  margin-bottom:16px;display:block;
 }
-.badges{display:flex;flex-wrap:wrap;gap:7px}
+.badges{display:block;line-height:2.2}
 .badge{
-  display:inline-flex;align-items:center;gap:4px;
-  background:rgba(255,255,255,.09);border:1px solid rgba(255,255,255,.16);
-  color:rgba(255,255,255,.88);font-size:10px;font-weight:600;
-  padding:3px 11px;border-radius:20px;white-space:nowrap;
+  display:inline-block;
+  background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.30);
+  color:#fff;font-size:10px;font-weight:600;
+  padding:3px 10px;border-radius:18px;
+  margin:2px 3px 2px 0;white-space:nowrap;
 }
-.badge.hi{background:rgba(16,185,129,.22);border-color:rgba(52,211,153,.35);color:#6EE7B7}
-.badge.warn{background:rgba(220,38,38,.18);border-color:rgba(252,165,165,.35);color:#FCA5A5}
+.badge.hi {background:rgba(5,150,105,.35);border-color:rgba(16,185,129,.50);color:#D1FAE5}
+.badge.warn{background:rgba(127,29,29,.40);border-color:rgba(252,165,165,.45);color:#FEE2E2}
 
-/* ── VALIDATION BAR ── */
-.validation-bar{
-  background:#ECFDF5;border-left:4px solid var(--green);
-  padding:11px 20px;display:flex;align-items:center;flex-wrap:wrap;gap:6px 14px;
-  font-size:10.5px;font-weight:600;color:#065F46;
-  border-bottom:1px solid #D1FAE5;
-}
-.vcheck{
-  display:inline-flex;align-items:center;gap:4px;
-  font-family:'DM Mono',monospace;font-size:9.5px;font-weight:500;
-  color:#047857;white-space:nowrap;
-}
-
-/* ── SECTION ── */
+/* ══════════════════════════════════════════════════════
+   SECTION WRAPPER
+   ══════════════════════════════════════════════════════ */
 .section{
-  background:#fff;border:1px solid var(--border);border-top:none;
-  padding:22px 24px;
+  background:#fff;
+  border:1px solid #DBEAFE;
+  border-top:none;
+  padding:18px 16px;
 }
-.section:last-child{border-radius:0 0 16px 16px}
-.sec-header{display:flex;align-items:baseline;gap:8px;margin-bottom:16px}
+.section:last-of-type{border-radius:0 0 14px 14px}
+
+.sec-header{
+  margin-bottom:14px;
+  padding-bottom:10px;
+  border-bottom:2px solid #EFF6FF;
+}
 .sec-title{
-  font-size:8px;font-weight:800;letter-spacing:2.5px;text-transform:uppercase;
-  color:var(--mid);
+  display:inline-block;
+  font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;
+  color:#0284C7;background:#EFF6FF;
+  padding:3px 9px;border-radius:5px;border:1px solid #BFDBFE;
 }
-.sec-sub{font-size:10px;color:#94A3B8}
+.sec-sub{
+  display:block;font-size:10.5px;color:#94A3B8;
+  margin-top:4px;font-style:italic;
+}
 
-/* ═══════════════════════════════════════════════
-   EXEC SNAPSHOT CARDS  — elevated tile design
-   ═══════════════════════════════════════════════ */
-.snap-grid{display:flex;flex-wrap:wrap;gap:10px}
-.snap-card{
-  flex:1 1 180px;min-width:0;
-  background:#fff;
-  border:1px solid var(--border);
-  border-radius:14px;
-  padding:16px 18px;
-  box-shadow:0 1px 4px rgba(0,0,0,.06),0 0 0 0 transparent;
-  position:relative;overflow:hidden;
+/* ══════════════════════════════════════════════════════
+   KPI TILES  — 2×2 table-based grid, 2 cards per row
+   Uses <table> with 2 <td class="kc"> per row
+   Inline border-top accent on each td
+   ══════════════════════════════════════════════════════ */
+.kgrid{
+  width:100%;border-collapse:separate;border-spacing:8px;
+  margin:-8px;          /* offset border-spacing so edge aligns */
 }
-/* coloured top accent bar per card — added via modifier classes */
-.snap-card::before{
-  content:'';position:absolute;top:0;left:0;right:0;height:3px;
-  background:linear-gradient(90deg,#6366F1,#8B5CF6);border-radius:14px 14px 0 0;
-}
-.snap-card.card-vol::before{background:linear-gradient(90deg,#2563EB,#60A5FA)}
-.snap-card.card-rev::before{background:linear-gradient(90deg,#059669,#34D399)}
-.snap-card.card-cogs::before{background:linear-gradient(90deg,#D97706,#FCD34D)}
-.snap-card.card-gm::before{background:linear-gradient(90deg,#7C3AED,#A78BFA)}
-.snap-label{
-  font-size:8px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;
-  color:#94A3B8;display:block;margin-bottom:8px;
-}
-.snap-val{
-  font-size:28px;font-weight:900;letter-spacing:-.6px;
-  display:block;line-height:1;margin-bottom:6px;
-}
-.snap-delta{font-size:10px;color:var(--mid);display:block;line-height:1.5}
-.snap-pill{
-  display:inline-block;font-size:8px;font-weight:700;
-  padding:2px 8px;border-radius:10px;margin-bottom:7px;letter-spacing:.3px;
-}
-.green-pill{background:var(--green-bg);color:var(--green);border:1px solid var(--green-border)}
-.red-pill{background:var(--red-bg);color:var(--red);border:1px solid var(--red-border)}
-.amber-pill{background:var(--amber-bg);color:var(--amber);border:1px solid var(--amber-border)}
-
-/* ═══════════════════════════════════════════════
-   KPI DASHBOARD TILES  — 2-row grid of 4
-   ═══════════════════════════════════════════════ */
-.kgrid,.today-grid{width:100%;border-collapse:separate;border-spacing:8px}
-.kc,.tc{
-  background:#fff;
-  border:1px solid var(--border);
-  border-radius:12px;
-  padding:14px 16px;
+.kc{
+  width:50%;
+  background:#F8FAFC;
+  border:1px solid #DBEAFE;
+  border-radius:10px;
+  padding:13px 14px 11px;
   vertical-align:top;
-  box-shadow:0 1px 3px rgba(0,0,0,.05);
-  transition:box-shadow .15s;
 }
-.kc-label,.tc-label{
-  display:block;font-size:7.5px;font-weight:700;letter-spacing:1.5px;
-  text-transform:uppercase;color:#94A3B8;margin-bottom:8px;
+.kc-label{
+  display:block;font-size:7.5px;font-weight:700;letter-spacing:1.4px;
+  text-transform:uppercase;color:#94A3B8;margin-bottom:7px;
 }
-.kc-val,.tc-today{
-  font-size:22px;font-weight:900;letter-spacing:-.4px;
-  display:block;line-height:1;margin-bottom:6px;color:#111827;
+.kc-val{
+  display:block;font-size:20px;font-weight:800;
+  letter-spacing:-.4px;line-height:1;margin-bottom:5px;
 }
-.kc-sub,.tc-prev{font-size:9.5px;color:#64748B;display:block;line-height:1.5}
-.kc-trend{display:block;margin-top:5px;font-size:10.5px}
+.kc-sub{
+  display:block;font-size:10px;color:#94A3B8;line-height:1.4;
+}
+.kc-trend{display:block;margin-top:5px;font-size:11px;font-weight:700}
 
-/* ═══════════════════════════════════════════════
-   DATA TABLES  — polished with header & rows
-   ═══════════════════════════════════════════════ */
-.table-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;width:100%;border-radius:10px;border:1px solid var(--border)}
-.data-table{width:100%;border-collapse:collapse;font-size:11.5px;min-width:480px}
-.data-table thead tr{background:linear-gradient(180deg,#F1F5F9 0%,#E9EFF6 100%)}
+/* ══════════════════════════════════════════════════════
+   TODAY GRID — 2-col same pattern
+   ══════════════════════════════════════════════════════ */
+.today-grid{
+  width:100%;border-collapse:separate;border-spacing:8px;
+  margin:-8px;
+}
+.tc{
+  width:50%;
+  background:#F0FDFA;
+  border:1px solid #CCFBF1;
+  border-radius:10px;
+  padding:13px 14px 11px;
+  vertical-align:top;
+}
+.tc-label{
+  display:block;font-size:7.5px;font-weight:700;letter-spacing:1.4px;
+  text-transform:uppercase;color:#94A3B8;margin-bottom:7px;
+}
+.tc-today{
+  display:block;font-size:20px;font-weight:800;
+  letter-spacing:-.4px;line-height:1;margin-bottom:5px;
+}
+.tc-prev{display:block;font-size:10px;color:#64748B;line-height:1.4}
+
+/* ══════════════════════════════════════════════════════
+   DATA TABLE  — horizontal scroll on mobile
+   ══════════════════════════════════════════════════════ */
+.table-scroll{
+  width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;
+  border-radius:8px;border:1px solid #DBEAFE;
+}
+.data-table{
+  width:100%;border-collapse:collapse;
+  font-size:11.5px;min-width:460px;
+}
+.data-table thead tr{background:#EFF6FF}
 .data-table th{
-  padding:10px 12px;font-size:8px;font-weight:700;
-  color:#475569;text-transform:uppercase;letter-spacing:1px;
-  border-bottom:2px solid #CBD5E1;text-align:left;white-space:nowrap;
+  padding:9px 11px;font-size:8px;font-weight:700;
+  color:#475569;text-transform:uppercase;letter-spacing:.9px;
+  border-bottom:2px solid #BFDBFE;text-align:left;white-space:nowrap;
 }
 .data-table th.R{text-align:right}
-/* alternating row shading */
-.data-table tbody tr:nth-child(even) td{background:#FAFBFC}
-.data-table tbody tr:nth-child(odd) td{background:#FFFFFF}
+.data-table tbody tr:nth-child(even) td{background:#F8FBFF}
 .data-table td{
-  padding:9px 12px;border-bottom:1px solid #F1F5F9;
-  color:#334155;vertical-align:top;
+  padding:9px 11px;border-bottom:1px solid #EFF6FF;
+  color:#334155;vertical-align:middle;word-break:break-word;
 }
-.data-table td.R{text-align:right;font-family:'DM Mono',monospace;font-size:11px}
-.data-table td.mono{font-family:'DM Mono',monospace;font-size:11px}
-.data-table tbody tr:hover td{background:#EFF6FF!important;transition:background .1s}
+.data-table td.R{
+  text-align:right;font-size:11px;white-space:nowrap;
+}
+.data-table td.mono{font-size:11px}
+.data-table tbody tr:last-child td{border-bottom:none;font-weight:700;background:#EFF6FF}
+.dot{
+  display:inline-block;width:8px;height:8px;
+  border-radius:3px;margin-right:6px;vertical-align:middle;
+}
+.up     {color:#DC2626;font-weight:700}
+.dn     {color:#059669;font-weight:700}
+.neutral{color:#94A3B8}
+.up-good{color:#059669;font-weight:700}
+
 /* total row */
 .data-table tr.total-row td{
-  background:linear-gradient(180deg,#F8FAFC 0%,#F1F5F9 100%)!important;
-  font-weight:700;border-top:2px solid #CBD5E1;
+  background:#EFF6FF!important;font-weight:700;
+  border-top:2px solid #BFDBFE;
 }
-.dot{
-  display:inline-block;width:9px;height:9px;border-radius:3px;
-  margin-right:7px;vertical-align:middle;
-}
-.up    {color:var(--red);font-weight:700}
-.dn    {color:var(--green);font-weight:700}
-.neutral{color:#94A3B8}
-.up-good{color:var(--green);font-weight:700}
 
-/* ── COGS BANNER ── */
-.cogs-banner{
-  background:linear-gradient(135deg,#EFF6FF 0%,#F0F9FF 100%);
-  border:1px solid var(--blue-border);border-left:4px solid var(--blue);
-  border-radius:0 8px 8px 0;
-  padding:12px 16px;margin-bottom:14px;
-  font-size:11.5px;font-weight:700;color:#1D4ED8;line-height:1.5;
+/* ══════════════════════════════════════════════════════
+   COGS SKU CARDS — 2×2 grid on both mobile and desktop
+   ══════════════════════════════════════════════════════ */
+.sku-grid{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:10px;
+  margin-top:12px;
 }
+.sku-card{
+  border:1px solid #DBEAFE;border-radius:10px;
+  padding:12px 13px;background:#F8FAFC;
+  border-left:4px solid #7DD3FC;
+}
+.sku-card-header{
+  display:flex;justify-content:space-between;
+  align-items:flex-start;margin-bottom:7px;gap:6px;
+}
+.sku-cat{font-weight:800;font-size:13px;color:#0F172A;flex-shrink:0}
+.sku-delta{font-size:11px;font-weight:800;text-align:right;white-space:nowrap}
+.sku-rc{
+  font-size:9px;color:#94A3B8;font-style:italic;
+  background:#EFF6FF;border-radius:5px;
+  padding:5px 8px;margin-bottom:8px;
+  line-height:1.65;word-break:break-word;
+}
+.sku-line{
+  font-size:10px;color:#475569;
+  line-height:1.8;margin-bottom:2px;
+  word-break:break-word;
+}
+.sku-gm-badge{
+  display:inline-block;font-size:8px;font-weight:700;
+  padding:1px 7px;border-radius:6px;margin-left:5px;
+}
+
+/* ══════════════════════════════════════════════════════
+   CLUSTER TABLE
+   ══════════════════════════════════════════════════════ */
+.cluster-wrap{
+  overflow-x:auto;-webkit-overflow-scrolling:touch;
+  border-radius:8px;border:1px solid #DBEAFE;
+}
+.cluster-wrap .data-table{min-width:600px}
+.cluster-wrap .data-table thead tr{background:#0284C7}
+.cluster-wrap .data-table th{color:#E0F2FE;border-bottom:2px solid #0369A1}
+.group-row td{
+  background:#EFF6FF;color:#0369A1;
+  font-weight:700;font-size:8.5px;text-transform:uppercase;
+  letter-spacing:1px;padding:6px 11px;border-top:2px solid #BFDBFE;
+}
+.gm-cell-hi {background:#DCFCE7;color:#166534;font-weight:800;text-align:center;padding:8px 10px}
+.gm-cell-mid{background:#FEF9C3;color:#92400E;font-weight:800;text-align:center;padding:8px 10px}
+.gm-cell-lo {background:#FEE2E2;color:#B91C1C;font-weight:800;text-align:center;padding:8px 10px}
 
 /* ── DRIVER CHIPS ── */
-.driver-chip{font-size:9.5px;color:#334155;line-height:1.75;white-space:normal}
+.driver-chip{
+  font-size:9.5px;color:#334155;
+  line-height:1.75;white-space:normal;
+  word-break:break-word;max-width:220px;
+}
 .tag-cogs,.tag-rev,.tag-ok,.tag-price{
   display:inline-block;font-size:7.5px;font-weight:700;
-  padding:2px 7px;border-radius:6px;margin:0 3px 2px 0;white-space:nowrap;
+  padding:2px 6px;border-radius:5px;
+  margin:0 2px 2px 0;white-space:nowrap;
 }
 .tag-cogs {background:#FEF3C7;color:#92400E;border:1px solid #FDE68A}
 .tag-rev  {background:#FEE2E2;color:#B91C1C;border:1px solid #FECACA}
 .tag-ok   {background:#DCFCE7;color:#166534;border:1px solid #BBF7D0}
 .tag-price{background:#EDE9FE;color:#5B21B6;border:1px solid #DDD6FE}
 
-/* ── CLUSTER TABLE ── */
-.cluster-wrap{
-  border-radius:12px;overflow:hidden;
-  border:1px solid var(--border);
-  overflow-x:auto;-webkit-overflow-scrolling:touch;
-}
-.cluster-wrap .data-table{min-width:680px}
-.cluster-wrap .data-table thead tr{background:linear-gradient(180deg,#1E293B 0%,#0F172A 100%)}
-.cluster-wrap .data-table th{color:#94A3B8;border-bottom:2px solid #334155}
-.group-row td{
-  background:linear-gradient(90deg,#F1F5F9 0%,#E9EFF6 100%);
-  color:#475569;font-weight:700;font-size:8.5px;
-  text-transform:uppercase;letter-spacing:1px;
-  padding:6px 14px;border-top:2px solid #CBD5E1;
-}
-.gm-cell-hi {background:#DCFCE7;color:#166534;font-weight:800;text-align:center;padding:8px 10px}
-.gm-cell-mid{background:#FEF9C3;color:#92400E;font-weight:800;text-align:center;padding:8px 10px}
-.gm-cell-lo {background:#FEE2E2;color:#B91C1C;font-weight:800;text-align:center;padding:8px 10px}
-
-/* ── SKU CARDS ── */
-.sku-grid{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}
-.sku-card{
-  flex:1 1 300px;min-width:0;
-  border:1px solid var(--border);border-radius:12px;
-  padding:14px 16px;background:#fff;
-  box-shadow:0 1px 3px rgba(0,0,0,.04);
-}
-.sku-card-header{
-  display:flex;justify-content:space-between;align-items:flex-start;
-  margin-bottom:8px;gap:8px;
-}
-.sku-cat{font-weight:800;font-size:13px;color:var(--ink)}
-.sku-delta{font-size:11.5px;font-weight:800;font-family:'DM Mono',monospace;text-align:right;white-space:nowrap}
-.sku-rc{
-  font-size:9.5px;color:#94A3B8;font-style:italic;
-  border-left:3px solid var(--border);padding-left:9px;
-  margin-bottom:9px;line-height:1.6;
-}
-.sku-line{font-size:10.5px;color:#475569;line-height:1.9;margin-bottom:2px}
-.sku-gm-badge{
-  display:inline-block;font-size:8.5px;font-weight:700;
-  padding:1px 8px;border-radius:8px;margin-left:6px;
-}
-
-/* ── ACTIONS / INSIGHTS ── */
-.actions-wrap{
-  background:#F8FAFC;border:1px solid #E2E8F0;
-  border-radius:12px;padding:18px 20px;
-}
-.actions-title{
-  font-size:8px;font-weight:800;letter-spacing:2px;
-  text-transform:uppercase;color:#64748B;margin-bottom:14px;
-  display:flex;align-items:center;gap:8px;
-}
-.actions-title::after{
-  content:'';flex:1;height:1px;background:#E2E8F0;
-}
-.action-item{
-  display:flex;gap:14px;align-items:flex-start;
-  padding:13px 0;border-bottom:1px solid #E9EFF6;
-}
-.action-item:last-child{border-bottom:none;padding-bottom:0}
-.action-num{
-  width:24px;height:24px;min-width:24px;border-radius:50%;
-  display:flex;align-items:center;justify-content:center;
-  font-size:10px;font-weight:800;flex-shrink:0;
-  background:var(--ink);color:#fff;
-  box-shadow:0 2px 4px rgba(0,0,0,.15);
-}
-.action-num.red  {background:var(--red)}
-.action-num.amber{background:var(--amber)}
-.action-num.green{background:var(--green)}
-.action-body{min-width:0;flex:1}
-.action-title{
-  font-size:12px;font-weight:700;color:var(--ink);
-  margin-bottom:4px;line-height:1.4;
-}
-.action-why{font-size:10.5px;color:#64748B;line-height:1.65}
-.impact-tag{
-  display:inline-block;font-size:8px;font-weight:700;
-  padding:2px 8px;border-radius:8px;margin-left:7px;
-  background:var(--red-bg);color:var(--red);
-  border:1px solid var(--red-border);white-space:nowrap;
-}
-.impact-tag.pos{
-  background:var(--green-bg);color:var(--green);border-color:var(--green-border);
-}
-
-/* ── WATCH LIST ── */
-.watch-list{border:1px solid var(--border);border-radius:12px;overflow:hidden}
+/* ══════════════════════════════════════════════════════
+   WATCH LIST
+   ══════════════════════════════════════════════════════ */
+.watch-list{border:1px solid #DBEAFE;border-radius:10px;overflow:hidden}
 .watch-item{
-  display:flex;gap:14px;align-items:flex-start;
-  padding:14px 18px;border-bottom:1px solid #F1F5F9;
+  display:flex;gap:12px;align-items:flex-start;
+  padding:13px 15px;border-bottom:1px solid #EFF6FF;
 }
 .watch-item:last-child{border-bottom:none}
 .watch-num{
-  width:28px;height:28px;min-width:28px;border-radius:50%;
+  width:26px;height:26px;min-width:26px;border-radius:50%;
   display:flex;align-items:center;justify-content:center;
-  font-size:12px;font-weight:800;flex-shrink:0;
+  font-size:11px;font-weight:800;flex-shrink:0;
 }
-.watch-red   .watch-num{background:var(--red-bg);  color:var(--red);  border:2px solid var(--red-border)}
-.watch-amber .watch-num{background:var(--amber-bg);color:var(--amber);border:2px solid var(--amber-border)}
-.watch-green .watch-num{background:var(--green-bg);color:var(--green);border:2px solid var(--green-border)}
+.watch-red   .watch-num{background:#FEE2E2;color:#DC2626;border:2px solid #FECACA}
+.watch-amber .watch-num{background:#FFFBEB;color:#D97706;border:2px solid #FDE68A}
+.watch-green .watch-num{background:#ECFDF5;color:#059669;border:2px solid #A7F3D0}
 .watch-tag{
-  display:inline-block;font-size:7.5px;font-weight:700;letter-spacing:.8px;
-  text-transform:uppercase;padding:2px 8px;border-radius:8px;margin-bottom:5px;
+  display:inline-block;font-size:7.5px;font-weight:700;
+  letter-spacing:.7px;text-transform:uppercase;
+  padding:2px 7px;border-radius:6px;margin-bottom:4px;
 }
-.watch-red   .watch-tag{background:var(--red-bg);  color:var(--red);  border:1px solid var(--red-border)}
-.watch-amber .watch-tag{background:var(--amber-bg);color:var(--amber);border:1px solid var(--amber-border)}
-.watch-green .watch-tag{background:var(--green-bg);color:var(--green);border:1px solid var(--green-border)}
+.watch-red   .watch-tag{background:#FEE2E2;color:#B91C1C;border:1px solid #FECACA}
+.watch-amber .watch-tag{background:#FFFBEB;color:#92400E;border:1px solid #FDE68A}
+.watch-green .watch-tag{background:#ECFDF5;color:#065F46;border:1px solid #A7F3D0}
 .watch-body{min-width:0;flex:1}
-.watch-title{font-size:12.5px;font-weight:700;color:var(--ink);margin-bottom:4px;line-height:1.35}
-.watch-why{font-size:10.5px;color:#64748B;line-height:1.6}
+.watch-title{
+  font-size:12.5px;font-weight:700;color:#0F172A;
+  margin-bottom:3px;line-height:1.35;
+  word-break:break-word;
+}
+.watch-why{
+  font-size:10.5px;color:#64748B;
+  line-height:1.65;word-break:break-word;
+}
 
-/* ── GM BRIDGE ── */
+/* ══════════════════════════════════════════════════════
+   GM BRIDGE  — horizontal scroll
+   ══════════════════════════════════════════════════════ */
 .bridge-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:4px}
 .bridge{
   display:flex;align-items:stretch;flex-wrap:nowrap;
-  gap:0;margin:12px 0;
-  font-family:'DM Mono',monospace;font-size:11px;min-width:min-content;
+  gap:0;margin:12px 0;font-size:11px;min-width:min-content;
 }
-.bridge-box{padding:10px 14px;text-align:center;min-width:80px}
+.bridge-box{padding:9px 13px;text-align:center;min-width:76px}
 .bridge-box.start{
-  background:var(--surface);border:1px solid var(--border);
-  border-radius:10px 0 0 10px;
+  background:#EFF6FF;border:1px solid #BFDBFE;border-radius:9px 0 0 9px;
 }
 .bridge-box.end{
-  background:var(--surface);border:1px solid var(--border);
-  border-radius:0 10px 10px 0;
+  background:#EFF6FF;border:1px solid #BFDBFE;border-radius:0 9px 9px 0;
 }
 .bridge-item{
-  background:var(--red-bg);border:1px solid var(--red-border);
-  padding:8px 11px;font-size:10px;border-left:none;min-width:76px;
+  background:#FEF2F2;border:1px solid #FECACA;
+  padding:7px 10px;font-size:10px;border-left:none;min-width:72px;
 }
-.bridge-item.pos{background:var(--green-bg);border-color:var(--green-border)}
+.bridge-item.pos{background:#ECFDF5;border-color:#A7F3D0}
 .bridge-label{
-  font-size:8px;color:var(--mid);display:block;margin-bottom:3px;
-  font-family:'DM Sans',sans-serif;white-space:nowrap;
+  font-size:8px;color:#64748B;display:block;margin-bottom:3px;white-space:nowrap;
 }
 .bridge-val{font-size:13px;font-weight:700;display:block}
 
-/* ── PRODUCT MIX BAR ── */
+/* ══════════════════════════════════════════════════════
+   PRODUCT MIX BAR
+   ══════════════════════════════════════════════════════ */
 .mix-bar{
-  height:26px;border-radius:10px;overflow:hidden;
-  display:flex;margin-bottom:14px;gap:2px;
-  box-shadow:inset 0 1px 2px rgba(0,0,0,.06);
+  height:24px;border-radius:8px;overflow:hidden;
+  display:flex;margin-bottom:12px;gap:2px;
 }
 
-/* ── FOOTER ── */
+/* ══════════════════════════════════════════════════════
+   FOOTER
+   ══════════════════════════════════════════════════════ */
 .footer{
-  background:#F1F5F9;border:1px solid var(--border);border-top:none;
-  border-radius:0 0 16px 16px;
-  padding:14px 28px;text-align:center;
-  font-size:9px;color:#94A3B8;
-  font-family:'DM Mono',monospace;letter-spacing:.3px;
-  line-height:1.6;
+  background:#EFF6FF;border:1px solid #BFDBFE;
+  border-top:2px solid #7DD3FC;
+  border-radius:0 0 14px 14px;
+  padding:12px 20px;text-align:center;
+  font-size:9px;color:#64748B;letter-spacing:.3px;
 }
 
-/* ══════════════════════════════════════════════════════════════
-   MOBILE — ≤640px
-   ══════════════════════════════════════════════════════════════ */
-@media(max-width:640px){
-  body{padding:6px 8px 32px}
+/* ══════════════════════════════════════════════════════
+   MOBILE  ≤ 600px
+   All grids collapse to 1-col or 2-col where specified
+   ══════════════════════════════════════════════════════ */
+@media screen and (max-width:600px){
+  body{padding:8px 6px 32px;font-size:13px}
   .page{max-width:100%}
-  .header{padding:18px 16px 16px;border-radius:12px 12px 0 0}
-  .header h1{font-size:15px}
-  .badge{font-size:9px;padding:3px 9px}
-  .section{padding:14px 14px}
-  /* 2-col snap */
-  .snap-grid{gap:8px}
-  .snap-card{flex:1 1 calc(50% - 4px);min-width:calc(50% - 4px);max-width:calc(50% - 4px);padding:12px 12px}
-  .snap-val{font-size:20px}
-  /* tables scroll */
-  .table-scroll{border-radius:8px}
-  .cluster-wrap{border-radius:8px}
-  /* bridge scroll */
-  .bridge-scroll{}
-  /* 1-col sku */
+  .header{padding:18px 14px 14px;border-radius:12px 12px 0 0}
+  .header h1{font-size:16px}
+  .header-meta{font-size:9.5px}
+  .eyebrow{font-size:9px}
+  .badge{font-size:9px;padding:3px 8px}
+
+  .section{padding:14px 12px}
+
+  /* KPI tiles — keep 2 per row, just tighter */
+  .kgrid{border-spacing:6px;margin:-6px}
+  .kc{padding:11px 11px 9px}
+  .kc-val{font-size:17px}
+  .kc-sub{font-size:9.5px}
+
+  /* Today tiles — keep 2 per row */
+  .today-grid{border-spacing:6px;margin:-6px}
+  .tc{padding:11px 11px 9px}
+  .tc-today{font-size:17px}
+  .tc-prev{font-size:9.5px}
+
+  /* SKU grid — 2 per row, slightly smaller */
   .sku-grid{gap:8px}
-  .sku-card{flex:1 1 100%}
-  .sku-card-header{flex-wrap:wrap}
-  /* watch */
-  .watch-item{padding:12px 12px;gap:10px}
-  .watch-title{font-size:11px}
+  .sku-cat{font-size:11px}
+  .sku-line{font-size:9.5px}
+  .sku-rc{font-size:8.5px}
+
+  /* Cluster driver column narrow */
+  .driver-chip{max-width:140px;font-size:9px}
+
+  /* Watch list */
+  .watch-item{padding:11px 11px;gap:9px}
+  .watch-title{font-size:11.5px}
   .watch-why{font-size:10px}
-  /* actions */
-  .action-item{gap:10px}
-  .action-title{font-size:11px}
-  .action-why{font-size:10px}
-  .impact-tag{display:block;margin:4px 0 0}
-  /* kpi tables 2-col */
-  .kgrid,.kgrid tbody,.kgrid tr,
-  .today-grid,.today-grid tbody,.today-grid tr{display:block!important;width:100%!important}
-  .kc,.tc{display:inline-block!important;width:calc(50% - 10px)!important;margin:4px!important;vertical-align:top;padding:10px 10px!important}
-  .kc-val,.tc-today{font-size:17px!important}
-  /* validation bar */
-  .validation-bar{flex-direction:column;align-items:flex-start;padding:10px 14px}
-  .vcheck{white-space:normal}
-  .footer{padding:12px 14px;font-size:8px}
+
+  .footer{padding:10px 12px;font-size:8px}
 }
 """
 
@@ -1101,9 +1072,9 @@ def build(data):
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     #  MTD KPI GRID (2 rows x 4)
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    def kcard(label, val, sub, vc='#111827', trend_html='', accent='#6366F1'):
+    def kcard(label, val, sub, vc='#111827', trend_html='', accent='#0284C7'):
         return (
-            '<td class="kc" style="border-top:3px solid {0}">'
+            '<td class="kc" style="border-top:4px solid {0}">'
             '<span class="kc-label">{1}</span>'
             '<span class="kc-val" style="color:{2}">{3}</span>'
             '<span class="kc-sub">{4}</span>'
@@ -1115,13 +1086,13 @@ def build(data):
         '<table class="kgrid"><tr>'
         + kcard('Installations MTD', '{:,}'.format(mtd['n']),
                 'vs {:,} {} (1&#8211;{})'.format(pm['n'], prev_lbl, pm_day),
-                trend_html=dpct(mtd['n'], pm['n']), accent='#2563EB')
+                trend_html=dpct(mtd['n'], pm['n']), accent='#0284C7')
         + kcard('kW Installed MTD', '{:,.0f} kW'.format(mtd['kw']),
                 'vs {:,.0f} kW {}'.format(pm['kw'], prev_lbl),
                 trend_html=dpct(mtd['kw'], pm['kw']))
         + kcard('Gross Margin', '{:.2f}%'.format(mtd['gm']),
                 'vs {:.2f}% {}'.format(pm['gm'], prev_lbl),
-                vc=gmc(mtd['gm']), trend_html=dpp(gm_trend), accent='#7C3AED')
+                vc=gmc(mtd['gm']), trend_html=dpp(gm_trend), accent='#8B5CF6')
         + kcard('Revenue MTD', fc(mtd['rev']),
                 'vs {} {}'.format(fc(pm['rev']), prev_lbl),
                 trend_html=dpct(mtd['rev'], pm['rev']), accent='#059669')
@@ -1144,25 +1115,29 @@ def build(data):
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     #  TODAY VS YESTERDAY
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    def tcard(label, today_val, prev_val, delta_html, vc='#111827', accent='#6366F1'):
+    def tcard(label, today_val, prev_val, delta_html, vc='#111827', accent='#0D9488'):
         return (
-            '<td class="tc" style="border-top:3px solid {0}">'
+            '<td class="tc" style="border-top:4px solid {0}">'
             '<span class="tc-label">{1}</span>'
             '<span class="tc-today" style="color:{2}">{3}</span>'
             '<span class="tc-prev">vs {4} yesterday &nbsp; {5}</span>'
             '</td>'
         ).format(accent, label, vc, today_val, prev_val, delta_html)
 
+    _lat_rev_str = fc(lat.get('rev', 0)) if lat.get('rev', 0) > 0 else ''
     today_html = (
-        '<table class="today-grid"><tr>'
+        '<table class="today-grid">'
+        '<tr>'
         + tcard('Installations', str(lat['n']), str(prv['n']),
                 dpct(lat['n'], prv['n']) if prv['n'] else '')
         + tcard('kW Installed', '{:.1f} kW'.format(lat['kw']), '{:.1f} kW'.format(prv['kw']),
                 dpval(lat['kw']-prv['kw'], 'kW') if prv['kw'] else '')
+        + '</tr><tr>'
         + tcard('Rev / Wp', '&#8377;{:.2f}'.format(lat['rev_wp']), '&#8377;{:.2f}'.format(prv['rev_wp']),
                 dpval(lat['rev_wp']-prv['rev_wp'], '&#8377;/Wp') if prv['rev_wp'] else '')
         + tcard('Avg System Size', '{:.2f} kW'.format(lat['aos']), '{:.2f} kW'.format(prv['aos']),
                 dpval(lat['aos']-prv['aos'], 'kW') if prv['aos'] else '')
+        + '</tr><tr>'
         + tcard('GM %', '{:.1f}%'.format(lat['gm']), '{:.1f}%'.format(prv['gm']),
                 dpp(lat['gm']-prv['gm']) if prv['gm'] else '', vc=gmc(lat['gm']))
         + '</tr></table>'
@@ -1500,14 +1475,13 @@ def build(data):
             '<td class="R mono">{:.2f} / {:.2f}</td>'
             '{}'
             '<td class="R">{}</td>'
-            '<td><div class="driver-chip">{} {}</div></td>'
+            # driver cell removed
             '</tr>'
         ).format(
             bgs, r['cluster'], sd, c['n'],
             c['rev_wp'], p['rev_wp'] if p['n'] else 0,
             gm_cell,
-            delta_html,
-            chip_tag, r['drv_tag']
+            delta_html
         )
 
     cl_thead = (
@@ -1518,22 +1492,22 @@ def build(data):
         '<th class="R">Rev/Wp MTD / {}</th>'
         '<th class="R">GM%</th>'
         '<th class="R">&#916;pp</th>'
-        '<th>Driver &#8594; Root Cause &#8594; SKU &#8594; Impact</th>'
+        # driver column header removed
         '</tr></thead>'
     ).format(prev_lbl)
 
     cl_tbody = ''
     if declining:
-        cl_tbody += '<tr class="group-row"><td colspan="7">&#9660; Declining vs {} &#8212; needs attention</td></tr>'.format(prev_lbl)
+        cl_tbody += '<tr class="group-row"><td colspan="6">&#9660; Declining vs {} &#8212; needs attention</td></tr>'.format(prev_lbl)
         cl_tbody += ''.join(cl_row(r,'#FFFBFB') for r in declining)
     if improving:
-        cl_tbody += '<tr class="group-row"><td colspan="7">&#9650; Improving vs {}</td></tr>'.format(prev_lbl)
+        cl_tbody += '<tr class="group-row"><td colspan="6">&#9650; Improving vs {}</td></tr>'.format(prev_lbl)
         cl_tbody += ''.join(cl_row(r,'#F9FFFA') for r in improving)
     if stable_cl:
-        cl_tbody += '<tr class="group-row"><td colspan="7">&#8594; Stable (within &plusmn;0.3pp)</td></tr>'
+        cl_tbody += '<tr class="group-row"><td colspan="6">&#8594; Stable (within &plusmn;0.3pp)</td></tr>'
         cl_tbody += ''.join(cl_row(r) for r in stable_cl)
     if nascent:
-        cl_tbody += '<tr class="group-row"><td colspan="7">&#9733; New / growing clusters</td></tr>'
+        cl_tbody += '<tr class="group-row"><td colspan="6">&#9733; New / growing clusters</td></tr>'
         cl_tbody += ''.join(cl_row(r,'#FAF5FF') for r in nascent)
 
     cl_html = (
@@ -1816,8 +1790,8 @@ def build(data):
 <style>''' + CSS + '''</style></head><body><div class="page">''' + ''.join([
 
         # ── HEADER
-        '<div class="header" style="background:#1A1A2E">',
-        '<div class="eyebrow">&#9728;&#65039; Solar Square &nbsp;&middot;&nbsp; B2C GM Report &nbsp;&middot;&nbsp; Analytics</div>',
+        '<div class="header">',
+        '<div class="eyebrow">&#9728; Solar Square &nbsp;&middot;&nbsp; Daily GM Report</div>',
         '<h1>', headline, '</h1>',
         '<div class="header-meta">Data through ', latest.strftime('%d %b %Y'),
         ' &nbsp;&middot;&nbsp; {} MTD vs full {} '.format(curr_lbl[:3], prev_lbl),
@@ -1833,30 +1807,20 @@ def build(data):
         warn_badges,
         '</div></div>',
 
-        # ── VALIDATION BANNER
-        validation_bar,
+        # validation banner removed
 
         # ── SECTIONS
-        section('Exec Snapshot', '{} MTD vs full {}'.format(curr_lbl[:3], prev_lbl), snap4_html),
-        section('MTD Dashboard', 'Revenue &middot; Margin &middot; Cost &middot; Volume vs full ' + prev_lbl, kpi_html),
+        # Exec Snapshot removed
+        section('MTD Dashboard', '{} MTD vs full {}'.format(curr_lbl[:3], prev_lbl), kpi_html),
         section('Today at a Glance', '{} vs {}'.format(lat_lbl, prv_lbl), today_html),
-        section('Product Mix', 'Offer-type split MTD vs full {} &#8212; installs, GM%, Rev/Wp'.format(prev_lbl), mix_html),
-        section('COGS Analysis',
-                'MTD {} vs full {} &#8212; SKU-level root cause &middot; all numbers cross-validated'.format(curr_lbl, prev_lbl),
-                cogs_html),
-        section('Cluster Health',
-                'All active clusters (n &#8805; {} MTD) &middot; GM%, Rev/Wp, auto-generated driver'.format(MIN_ORDERS),
-                cl_html),
-        section('Top Things to Watch', 'Prioritised signals for decision-making', watch_html),
-        section('Deep-Dive Insights',
-                'Pre-analysed root causes &#8212; no follow-up research needed',
-                actions_html),
+        section('Product Mix', 'Offer-type split MTD vs full {}'.format(prev_lbl), mix_html),
+        section('COGS Analysis', '{} MTD vs full {} &#8212; SKU-level root cause'.format(curr_lbl, prev_lbl), cogs_html),
+        section('Cluster Health', 'Active clusters (n &#8805; {}) &#8212; GM%, Rev/Wp, &#916;pp'.format(MIN_ORDERS), cl_html),
+        # Top Things to Watch removed
+        # Deep-Dive Insights removed
 
         # ── FOOTER
-        '<div class="footer">Solar Square GM Analytics &nbsp;&middot;&nbsp; ',
-        '{} MTD {} vs {} {} &nbsp;&middot;&nbsp; '.format(curr_lbl[:3], latest.year, prev_lbl, pm_last.year),
-        'COGS cross-check diff = &#8377;{:.0f} &nbsp;&middot;&nbsp; Generated {}'.format(cogs_diff_val, now_str),
-        '</div>',
+        '<div class="footer">&#9728; Solar Square GM Report &nbsp;&middot;&nbsp; {} &nbsp;&middot;&nbsp; Generated {}</div>'.format(curr_lbl, now_str),
 
         '</div></body></html>',
     ])
