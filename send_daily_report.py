@@ -321,8 +321,9 @@ def by_cluster(projects):
     return d
 
 def get_driver(curr, prev, sku_ctx=None):
-    """Data-only cluster signal: revenue realisation · COGS category mix · product/system mix.
-    No actionables — pure data on what moved and which lever drove it."""
+    """Pure data insight for cluster signal column.
+    Qualifies: (A) revenue realisation lever, (B) COGS mix lever, (C) product mix lever.
+    No actionables — what happened and which metric moved."""
     if prev['n'] < MIN_ORDERS:
         return '--', {}, 'Thin prior data'
 
@@ -332,10 +333,10 @@ def get_driver(curr, prev, sku_ctx=None):
     ck_wp = (curr['cogs_kw'] - prev['cogs_kw']) / 1000
     d = dict(rev_wp_d=rv, aos_d=ao, aov_d=curr['aov']-prev['aov'], cogs_kw_d=ck_wp*1000)
 
-    # ── Per-cluster COGS category breakdown in &#8377;/Wp ──────────────
+    # ── Per-cluster COGS category breakdown in ₹/Wp ──────────────
     cat_d = {}
     if curr['kw'] and prev['kw']:
-        for cat, key in [('Inverter','inv'),('MMS','mms'),('Cables','cab')]:
+        for cat, key in [('Inverter','inv'),('MMS','mms'),('Cables','cab'),('Module','mod')]:
             cat_d[cat] = curr.get(key,0)/curr['kw']/1000 - prev.get(key,0)/prev['kw']/1000
 
     rising  = sorted([(c,v) for c,v in cat_d.items() if v >  0.04], key=lambda x:-x[1])
@@ -343,36 +344,52 @@ def get_driver(curr, prev, sku_ctx=None):
 
     parts = []
 
-    # ── Lever 1: Revenue realisation ─────────────────────────────────────
+    # ── Lever A: Revenue realisation ─────────────────────────────
     if abs(rv) > 0.2:
-        parts.append('Rev/Wp {:+.2f}/Wp (&#8377;{:.2f}&#8594;&#8377;{:.2f})'.format(
-            rv, prev['rev_wp'], curr['rev_wp']))
+        direction = 'softening' if rv < 0 else 'strengthening'
+        parts.append(
+            'Rev/Wp &#8377;{:.2f}&#8594;&#8377;{:.2f} ({:+.2f}/Wp realization {})'.format(
+                prev['rev_wp'], curr['rev_wp'], rv, direction))
 
-    # ── Lever 2: COGS category mix — which sub-category moved ────────────
+    # ── Lever B: COGS mix — which sub-category moved and why ────
     if abs(ck_wp) > 0.02:
         all_sig = (rising + falling) if ck_wp > 0 else (falling + rising)
         cat_strs = []
         for cat, v in all_sig[:3]:
-            # Add mix context: Inverter ↔ 3Ph product mix; MMS/Cables ↔ AoS structural vs rate
+            # Describe mix context: what product/structural factor explains each category
             if cat == 'Inverter' and abs(v) > 0.02:
-                mix_note = ' (3Ph product mix)' if ao < 0.15 else ' (3Ph mix + AoS {:.2f}kW)'.format(ao)
-            elif cat in ('MMS', 'Cables') and ao > 0.1 and v > 0:
-                mix_note = ' (AoS +{:.2f}kW structural)'.format(ao)
+                if ao > 0.15:
+                    mix_ctx = '3Ph product mix shift + AoS {:+.2f}kW'.format(ao)
+                else:
+                    mix_ctx = '3Ph product mix shift (SG6RT/SG8RT weight)'
+            elif cat == 'MMS' and ao > 0.1 and v > 0:
+                mix_ctx = 'AoS {:+.2f}kW &#8594; more structural material per system'.format(ao)
+            elif cat == 'MMS' and v > 0:
+                mix_ctx = 'Prefab/Column Gen2 rate or type-mix shift'
+            elif cat == 'Cables' and ao > 0.08 and v > 0:
+                mix_ctx = 'Routing length scales with AoS {:+.2f}kW'.format(ao)
+            elif cat == 'Cables' and v > 0:
+                mix_ctx = 'DC/AC cable rate movement'
+            elif cat == 'Module':
+                mix_ctx = 'Module procurement rate'
             elif sku_ctx and cat in sku_ctx:
-                mix_note = ' [{}]'.format(sku_ctx[cat])
+                mix_ctx = sku_ctx[cat]
             else:
-                mix_note = ''
+                mix_ctx = 'rate/mix movement'
             sign = '+' if v > 0 else '&#8722;'
-            cat_strs.append('{} {}{:.3f}/Wp{}'.format(cat, sign, abs(v), mix_note))
+            cat_strs.append(
+                '<b>{}</b>&nbsp;{}{:.3f}/Wp&nbsp;<span style="color:#6B7280;font-size:9.5px">'
+                '({})</span>'.format(cat, sign, abs(v), mix_ctx))
         if cat_strs:
             parts.append('COGS mix: {}'.format('; '.join(cat_strs)))
 
-    # ── Lever 3: System-size / product mix (AoS) when COGS is contained ──
+    # ── Lever C: Product/system-size mix (AoS) when COGS is contained ──
     if abs(ao) > 0.15 and abs(ck_wp) <= 0.02:
-        parts.append('AoS {:+.2f}kW ({:.2f}&#8594;{:.2f}kW) &#8212; system-size mix shift'.format(
-            ao, prev['aos'], curr['aos']))
+        parts.append(
+            'AoS {:+.2f}kW ({:.2f}&#8594;{:.2f}kW) &#8212; product mix shift, COGS contained'.format(
+                ao, prev['aos'], curr['aos']))
 
-    # ── Stable fallback ───────────────────────────────────────────────────
+    # ── Stable fallback ───────────────────────────────────────────
     if not parts:
         sub = []
         if abs(rv) > 0.1:      sub.append('Rev/Wp {:+.2f}/Wp'.format(rv))
@@ -382,8 +399,8 @@ def get_driver(curr, prev, sku_ctx=None):
                     'All levers &lt;0.5% change &#8212; stable'
         return narrative, dict(d, cat_d=cat_d), narrative
 
-    # ── GM outcome (data observation, not action) ─────────────────────────
-    parts.append('&#8594; {}{:.2f}pp GM'.format('+' if gm_d>=0 else '', gm_d))
+    # ── GM outcome observation ────────────────────────────────────
+    parts.append('&#8594;&nbsp;<b>{}{:.2f}pp GM</b>'.format('+' if gm_d>=0 else '', gm_d))
     narrative = '; '.join(parts)
 
     types = []
@@ -433,12 +450,14 @@ def gmcell(pct, fw='600'):
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 CSS = """
 :root{
-  --black:#0A0A0A;--ink:#1A1A2E;--slate:#2C3E50;
-  --green:#00875A;--green-bg:#E3FCF4;
-  --red:#C0392B;--red-bg:#FDECEA;
-  --amber:#B7791F;--amber-bg:#FEF9EC;
-  --blue:#1A6FCA;--blue-bg:#EBF3FD;
-  --mid:#6B7280;--border:#E5E7EB;--surface:#F9FAFB;
+  --black:#0A0A0A;--ink:#0F172A;--slate:#1E293B;
+  --green:#047857;--green-bg:#D1FAE5;--green-text:#065F46;
+  --red:#B91C1C;--red-bg:#FEE2E2;--red-text:#7F1D1D;
+  --amber:#92400E;--amber-bg:#FEF3C7;--amber-text:#78350F;
+  --blue:#1D4ED8;--blue-bg:#DBEAFE;--blue-text:#1E3A8A;
+  --purple:#6D28D9;--purple-bg:#EDE9FE;--purple-text:#4C1D95;
+  --teal:#0E7490;--teal-bg:#CFFAFE;--teal-text:#164E63;
+  --mid:#64748B;--border:#E2E8F0;--surface:#F8FAFC;
 }
 *{box-sizing:border-box;margin:0;padding:0}
 body{
@@ -488,17 +507,7 @@ body{
 .badge.hi{background:rgba(0,135,90,.25);border-color:rgba(0,215,140,.3);color:#4FFFB0}
 .badge.warn{background:rgba(192,57,43,.2);border-color:rgba(255,100,80,.3);color:#FF9090}
 
-/* ── VALIDATION BANNER ── */
-.validation-bar{
-  background:#fff;border-left:4px solid var(--green);
-  padding:14px 20px;display:flex;align-items:center;flex-wrap:wrap;gap:8px;
-  font-size:11.5px;color:#065F46;border-bottom:1px solid var(--border);
-}
-.vcheck{
-  display:inline-flex;align-items:center;gap:5px;margin-right:16px;
-  font-family:'DM Mono',monospace;font-size:10.5px;font-weight:500;
-  white-space:nowrap;
-}
+/* validation banner removed */
 
 /* ── SECTION ── */
 .section{
@@ -548,28 +557,33 @@ body{
 .up-good{color:var(--green);font-weight:700}
 
 /* ── DRIVER / SIGNAL COLUMN ── */
-.driver-chip{display:inline-block;font-size:9.5px;color:#374151;line-height:1.7;max-width:420px;white-space:normal}
-.signal{font-size:10.5px;color:#374151;line-height:1.6;vertical-align:top}
-.tag-cogs{display:inline-block;font-size:8px;font-weight:700;padding:1px 6px;border-radius:6px;background:#FEF3C7;color:#92400E;margin:0 4px 0 0}
-.tag-rev{display:inline-block;font-size:8px;font-weight:700;padding:1px 6px;border-radius:6px;background:#FEE2E2;color:#991B1B;margin:0 4px 0 0}
-.tag-ok{display:inline-block;font-size:8px;font-weight:700;padding:1px 6px;border-radius:6px;background:#DCFCE7;color:#166534;margin:0 4px 0 0}
-.tag-price{display:inline-block;font-size:8px;font-weight:700;padding:1px 6px;border-radius:6px;background:#EDE9FE;color:#5B21B6;margin:0 4px 0 0}
-.tag-warn{display:inline-block;font-size:8px;font-weight:700;padding:1px 6px;border-radius:6px;background:#FEF3C7;color:#92400E;margin:0 4px 0 0}
+.driver-chip{display:inline-block;font-size:9.5px;color:#1E293B;line-height:1.9;max-width:440px;white-space:normal}
+.signal{font-size:10.5px;color:#1E293B;line-height:1.9;vertical-align:top}
+.tag-cogs{display:inline-block;font-size:8.5px;font-weight:800;padding:2px 8px;border-radius:6px;background:#FEF3C7;color:#78350F;border:1px solid #FCD34D;margin:0 4px 2px 0;letter-spacing:.2px}
+.tag-rev{display:inline-block;font-size:8.5px;font-weight:800;padding:2px 8px;border-radius:6px;background:#FEE2E2;color:#7F1D1D;border:1px solid #FCA5A5;margin:0 4px 2px 0;letter-spacing:.2px}
+.tag-ok{display:inline-block;font-size:8.5px;font-weight:800;padding:2px 8px;border-radius:6px;background:#D1FAE5;color:#065F46;border:1px solid #6EE7B7;margin:0 4px 2px 0;letter-spacing:.2px}
+.tag-price{display:inline-block;font-size:8.5px;font-weight:800;padding:2px 8px;border-radius:6px;background:#E0E7FF;color:#3730A3;border:1px solid #A5B4FC;margin:0 4px 2px 0;letter-spacing:.2px}
+.tag-mix{display:inline-block;font-size:8.5px;font-weight:800;padding:2px 8px;border-radius:6px;background:#CFFAFE;color:#164E63;border:1px solid #67E8F9;margin:0 4px 2px 0;letter-spacing:.2px}
+.tag-warn{display:inline-block;font-size:8.5px;font-weight:800;padding:2px 8px;border-radius:6px;background:#FEF3C7;color:#78350F;border:1px solid #FCD34D;margin:0 4px 2px 0;letter-spacing:.2px}
+.sig-ctx{font-size:9.5px;color:#475569;font-style:italic}
 
 /* ── CLUSTER TABLE — COMPACT 5-COLUMN ── */
 .cluster-wrap{border-radius:10px;overflow:hidden;border:1px solid var(--border);overflow-x:auto;-webkit-overflow-scrolling:touch}
 .cluster-wrap .data-table{min-width:560px}
 .group-row td{
-  background:#F1F5F9;color:#475569;font-weight:700;
-  font-size:9px;text-transform:uppercase;letter-spacing:1px;
-  padding:5px 12px;border-top:2px solid #E2E8F0;
+  font-weight:800;font-size:9px;text-transform:uppercase;letter-spacing:1.2px;
+  padding:7px 14px;border-top:none;
 }
+.group-row.declining td{background:#7F1D1D;color:#FECACA;border-top:2px solid #7F1D1D}
+.group-row.improving td{background:#065F46;color:#A7F3D0;border-top:2px solid #065F46}
+.group-row.stable td{background:#1E3A5F;color:#BFDBFE;border-top:2px solid #1E3A5F}
+.group-row.nascent td{background:#3B1FA8;color:#DDD6FE;border-top:2px solid #3B1FA8}
 
-/* GM% cells — 4-tier colour scale */
-.gm-cell-hi  {background:#DCFCE7;color:#166534;font-weight:800;text-align:center;padding:9px 12px;font-family:'DM Mono',monospace;font-size:12px}
-.gm-cell-mid {background:#FEF9C3;color:#854D0E;font-weight:800;text-align:center;padding:9px 12px;font-family:'DM Mono',monospace;font-size:12px}
-.gm-cell-lo  {background:#FEE2E2;color:#991B1B;font-weight:800;text-align:center;padding:9px 12px;font-family:'DM Mono',monospace;font-size:12px}
-.gm-cell-crit{background:#7F1D1D;color:#fff;    font-weight:800;text-align:center;padding:9px 12px;font-family:'DM Mono',monospace;font-size:12px}
+/* GM% cells — 4-tier colour scale (high contrast) */
+.gm-cell-hi  {background:#059669;color:#fff;font-weight:800;text-align:center;padding:9px 12px;font-family:'DM Mono',monospace;font-size:12px}
+.gm-cell-mid {background:#D97706;color:#fff;font-weight:800;text-align:center;padding:9px 12px;font-family:'DM Mono',monospace;font-size:12px}
+.gm-cell-lo  {background:#DC2626;color:#fff;font-weight:800;text-align:center;padding:9px 12px;font-family:'DM Mono',monospace;font-size:12px}
+.gm-cell-crit{background:#7C0D0D;color:#FFD0D0;font-weight:800;text-align:center;padding:9px 12px;font-family:'DM Mono',monospace;font-size:12px;letter-spacing:.5px}
 
 /* Cluster name + state inline */
 .cluster-name{font-weight:700;font-size:12px;display:block}
@@ -579,10 +593,10 @@ body{
 .cluster-legend{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
 .cluster-legend-label{font-size:9px;color:#6B7280;font-weight:700;text-transform:uppercase;letter-spacing:.8px;margin-right:4px}
 .leg-pill{display:inline-flex;align-items:center;gap:5px;font-size:9px;font-weight:700;padding:3px 10px;border-radius:8px}
-.leg-hi  {background:#DCFCE7;color:#166534}
-.leg-mid {background:#FEF9C3;color:#854D0E}
-.leg-lo  {background:#FEE2E2;color:#991B1B}
-.leg-crit{background:#7F1D1D;color:#fff}
+.leg-hi  {background:#059669;color:#fff}
+.leg-mid {background:#D97706;color:#fff}
+.leg-lo  {background:#DC2626;color:#fff}
+.leg-crit{background:#7C0D0D;color:#FFD0D0}
 
 /* ── SKU CARDS ── */
 .sku-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
@@ -656,9 +670,7 @@ body{
   .today-grid,.today-grid tbody,.today-grid tr{display:block!important;width:100%!important}
   .kc,.tc{display:inline-block!important;width:calc(50% - 10px)!important;margin:4px!important;vertical-align:top;padding:10px 10px!important}
   .kc-val,.tc-today{font-size:17px!important}
-  /* validation bar stack */
-  .validation-bar{flex-direction:column;align-items:flex-start;padding:10px 14px}
-  .vcheck{white-space:normal;margin-right:0}
+
   .driver-chip{max-width:100%;font-size:9px}
   .cluster-legend{gap:5px}
   .leg-pill{font-size:8px;padding:2px 7px}
@@ -1149,20 +1161,31 @@ def build(data):
         top_rising  = max(cat_d.items(), key=lambda x: x[1]) if cat_d else None
         top_falling = min(cat_d.items(), key=lambda x: x[1]) if cat_d else None
 
+        # Primary tag: reflects the dominant lever for GM movement
         if 'price_dn' in types:
             chip_tag = '<span class="tag-rev">Rev &#8722;&#8377;{:.2f}/Wp</span>'.format(abs(rv_d))
-        elif 'cogs_up' in types and top_rising:
-            chip_tag = '<span class="tag-cogs">{} +&#8377;{:.3f}/Wp</span>'.format(
-                top_rising[0], abs(top_rising[1]))
-        elif 'cogs_dn' in types and top_falling:
-            chip_tag = '<span class="tag-ok">{} &#8722;&#8377;{:.3f}/Wp</span>'.format(
-                top_falling[0], abs(top_falling[1]))
         elif 'price_up' in types:
             chip_tag = '<span class="tag-ok">Rev +&#8377;{:.2f}/Wp</span>'.format(rv_d)
+        elif 'cogs_up' in types and top_rising:
+            # Show COGS category + context about which lever (rate/mix/AoS)
+            cat_name, cat_val = top_rising
+            ao_val = det.get('aos_d', 0)
+            if cat_name in ('MMS', 'Cables') and ao_val > 0.1:
+                ctx = 'AoS{:+.2f}kW'.format(ao_val)
+            elif cat_name == 'Inverter':
+                ctx = '3Ph mix'
+            else:
+                ctx = 'rate/mix'
+            chip_tag = '<span class="tag-cogs">{} +&#8377;{:.3f}/Wp</span> <span class="tag-mix">{}</span>'.format(
+                cat_name, abs(cat_val), ctx)
+        elif 'cogs_dn' in types and top_falling:
+            cat_name, cat_val = top_falling
+            chip_tag = '<span class="tag-ok">{} &#8722;&#8377;{:.3f}/Wp</span>'.format(
+                cat_name, abs(cat_val))
         elif r['gm_d'] > 0.15:
-            chip_tag = '<span class="tag-ok">Improving</span>'
+            chip_tag = '<span class="tag-ok">&#9650; Improving</span>'
         elif abs(r['gm_d']) < 0.15:
-            chip_tag = '<span class="tag-ok">Stable</span>'
+            chip_tag = '<span class="tag-ok">&#8594; Stable</span>'
         else:
             chip_tag = ''
 
@@ -1206,11 +1229,13 @@ def build(data):
     # ── Legend ──────────────────────────────────────────────────
     cluster_legend_html = (
         '<div class="cluster-legend">'
-        '<span class="cluster-legend-label">GM%</span>'
+        '<span class="cluster-legend-label">GM% Scale</span>'
         '<span class="leg-pill leg-hi">&#8805; 44% Outperforming</span>'
         '<span class="leg-pill leg-mid">42&#8211;44% On-target</span>'
         '<span class="leg-pill leg-lo">40&#8211;42% Below target</span>'
-        '<span class="leg-pill leg-crit">&lt;40% Critical</span>'
+        '<span class="leg-pill leg-crit">&lt; 40% Floor breach</span>'
+        '<span style="font-size:8.5px;color:#64748B;margin-left:8px;font-style:italic">'
+        '&#9679; Signal column shows: realization lever &middot; COGS mix lever &middot; product mix lever</span>'
         '</div>'
     )
 
@@ -1226,16 +1251,16 @@ def build(data):
 
     cl_tbody = ''
     if declining:
-        cl_tbody += '<tr class="group-row"><td colspan="5">&#9660; Declining vs {} &#8212; needs attention</td></tr>'.format(prev_lbl)
-        cl_tbody += ''.join(cl_row(r,'#FFFBFB') for r in declining)
+        cl_tbody += '<tr class="group-row declining"><td colspan="5">&#9660;&nbsp; Declining vs {} &mdash; GM compression observed</td></tr>'.format(prev_lbl)
+        cl_tbody += ''.join(cl_row(r,'#FFF5F5') for r in declining)
     if improving:
-        cl_tbody += '<tr class="group-row"><td colspan="5">&#9650; Improving vs {}</td></tr>'.format(prev_lbl)
-        cl_tbody += ''.join(cl_row(r,'#F9FFFA') for r in improving)
+        cl_tbody += '<tr class="group-row improving"><td colspan="5">&#9650;&nbsp; Improving vs {} &mdash; GM expansion observed</td></tr>'.format(prev_lbl)
+        cl_tbody += ''.join(cl_row(r,'#F0FFF8') for r in improving)
     if stable_cl:
-        cl_tbody += '<tr class="group-row"><td colspan="5">&#8594; Stable (within &plusmn;0.3pp)</td></tr>'
+        cl_tbody += '<tr class="group-row stable"><td colspan="5">&#8594;&nbsp; Stable &mdash; within &plusmn;0.3pp</td></tr>'
         cl_tbody += ''.join(cl_row(r) for r in stable_cl)
     if nascent:
-        cl_tbody += '<tr class="group-row"><td colspan="5">&#9733; New / growing clusters</td></tr>'
+        cl_tbody += '<tr class="group-row nascent"><td colspan="5">&#9733;&nbsp; Emerging clusters &mdash; growing volume</td></tr>'
         cl_tbody += ''.join(cl_row(r,'#FAF5FF') for r in nascent)
 
     cl_html = (
@@ -1264,19 +1289,9 @@ def build(data):
         warn_badges += ' <span class="badge warn">{} {:+.2f}pp &#9888;</span>'.format(
             r['cluster'], r['gm_d'])
 
-    # Data validation
+    # COGS diff still computed for footer use
     cogs_sum_calc = mtd['mod']+mtd['inv']+mtd['mms']+mtd['cab']+mtd['mtr']+mtd['ic']+mtd['oth']
     cogs_diff_val = abs(mtd['cogs'] - cogs_sum_calc)
-    validation_bar = (
-        '<div class="validation-bar">'
-        '<strong>&#128269; DATA VALIDATION COMPLETE</strong>&nbsp;&nbsp;'
-        '<span class="vcheck">&#10004; COGS sum = mod+inv+mms+cab+mtr+ic+oth '
-        '(diff: &#8377;{:.0f} MTD)</span>'
-        '<span class="vcheck">&#10004; Rev/Wp = Rev &#247; (kW&#215;1000) cross-checked</span>'
-        '<span class="vcheck">&#10004; GM% = (Rev&#8722;COGS) &#247; Rev verified</span>'
-        '<span class="vcheck">&#10004; SKU &#8377;/Wp reconciled to COGS table</span>'
-        '</div>'
-    ).format(cogs_diff_val)
 
     html = '''<!DOCTYPE html><html lang="en"><head>''' + '''
 <meta charset="UTF-8">
@@ -1285,7 +1300,7 @@ def build(data):
 <style>''' + CSS + '''</style></head><body><div class="page">''' + ''.join([
 
         # ── HEADER
-        '<div class="header" style="background:#1A1A2E">',
+        '<div class="header" style="background:linear-gradient(135deg,#0F172A 0%,#1E293B 60%,#0F2744 100%)">',
         '<div class="eyebrow">&#9728;&#65039; Solar Square &nbsp;&middot;&nbsp; B2C GM Report &nbsp;&middot;&nbsp; Analytics</div>',
         '<h1>', headline, '</h1>',
         '<div class="header-meta">Data through ', latest.strftime('%d %b %Y'),
@@ -1301,9 +1316,6 @@ def build(data):
         ' <span class="badge">AoS {:.2f} kW</span>'.format(mtd['aos']),
         warn_badges,
         '</div></div>',
-
-        # ── VALIDATION BANNER
-        validation_bar,
 
         # ── SECTIONS
         section('Exec Snapshot', '{} MTD vs full {}'.format(curr_lbl[:3], prev_lbl), snap4_html),
