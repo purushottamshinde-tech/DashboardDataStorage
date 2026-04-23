@@ -434,7 +434,6 @@ def gmcell(pct, fw='600'):
 CSS = """
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap');
 
-CSS = """
 :root{
   --primary:#3B82F6;
   --primary-light:#60A5FA;
@@ -599,7 +598,7 @@ body{
     width:48%;
   }
 }
-"""
+
 """
 
 
