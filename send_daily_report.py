@@ -6,9 +6,9 @@ from datetime import datetime, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
-SENDER     = os.environ.get("GMAIL_USER", "business.finance@solarsquare.in")
-RECIPIENTS = os.environ.get("REPORT_TO",  "").split(",")
-GMAIL_PASS = os.environ.get("GMAIL_PASSWORD", "Financesse@123")
+SENDER     = os.environ.get("GMAIL_USER", "purushottam.shinde@solarsquare.in")
+RECIPIENTS = os.environ.get("REPORT_TO",  "shindepurushottam7460@gmail.com").split(",")
+GMAIL_PASS = os.environ.get("GMAIL_PASSWORD", "")
 DATA_FILE  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "projects.json.gz")
 MIN_ORDERS = 10
 
