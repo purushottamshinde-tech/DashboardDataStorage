@@ -321,8 +321,9 @@ def by_cluster(projects):
     return d
 
 def get_driver(curr, prev, sku_ctx=None):
-    """Data-only cluster signal: revenue realisation · COGS category mix · product/system mix.
-    No actionables — pure data on what moved and which lever drove it."""
+    """Pure data insight for cluster signal column.
+    Qualifies: (A) revenue realisation lever, (B) COGS mix lever, (C) product mix lever.
+    No actionables — what happened and which metric moved."""
     if prev['n'] < MIN_ORDERS:
         return '--', {}, 'Thin prior data'
 
@@ -332,10 +333,10 @@ def get_driver(curr, prev, sku_ctx=None):
     ck_wp = (curr['cogs_kw'] - prev['cogs_kw']) / 1000
     d = dict(rev_wp_d=rv, aos_d=ao, aov_d=curr['aov']-prev['aov'], cogs_kw_d=ck_wp*1000)
 
-    # ── Per-cluster COGS category breakdown in &#8377;/Wp ──────────────
+    # ── Per-cluster COGS category breakdown in ₹/Wp ──────────────
     cat_d = {}
     if curr['kw'] and prev['kw']:
-        for cat, key in [('Inverter','inv'),('MMS','mms'),('Cables','cab')]:
+        for cat, key in [('Inverter','inv'),('MMS','mms'),('Cables','cab'),('Module','mod')]:
             cat_d[cat] = curr.get(key,0)/curr['kw']/1000 - prev.get(key,0)/prev['kw']/1000
 
     rising  = sorted([(c,v) for c,v in cat_d.items() if v >  0.04], key=lambda x:-x[1])
@@ -343,36 +344,52 @@ def get_driver(curr, prev, sku_ctx=None):
 
     parts = []
 
-    # ── Lever 1: Revenue realisation ─────────────────────────────────────
+    # ── Lever A: Revenue realisation ─────────────────────────────
     if abs(rv) > 0.2:
-        parts.append('Rev/Wp {:+.2f}/Wp (&#8377;{:.2f}&#8594;&#8377;{:.2f})'.format(
-            rv, prev['rev_wp'], curr['rev_wp']))
+        direction = 'softening' if rv < 0 else 'strengthening'
+        parts.append(
+            'Rev/Wp &#8377;{:.2f}&#8594;&#8377;{:.2f} ({:+.2f}/Wp realization {})'.format(
+                prev['rev_wp'], curr['rev_wp'], rv, direction))
 
-    # ── Lever 2: COGS category mix — which sub-category moved ────────────
+    # ── Lever B: COGS mix — which sub-category moved and why ────
     if abs(ck_wp) > 0.02:
         all_sig = (rising + falling) if ck_wp > 0 else (falling + rising)
         cat_strs = []
         for cat, v in all_sig[:3]:
-            # Add mix context: Inverter ↔ 3Ph product mix; MMS/Cables ↔ AoS structural vs rate
+            # Describe mix context: what product/structural factor explains each category
             if cat == 'Inverter' and abs(v) > 0.02:
-                mix_note = ' (3Ph product mix)' if ao < 0.15 else ' (3Ph mix + AoS {:.2f}kW)'.format(ao)
-            elif cat in ('MMS', 'Cables') and ao > 0.1 and v > 0:
-                mix_note = ' (AoS +{:.2f}kW structural)'.format(ao)
+                if ao > 0.15:
+                    mix_ctx = '3Ph product mix shift + AoS {:+.2f}kW'.format(ao)
+                else:
+                    mix_ctx = '3Ph product mix shift (SG6RT/SG8RT weight)'
+            elif cat == 'MMS' and ao > 0.1 and v > 0:
+                mix_ctx = 'AoS {:+.2f}kW &#8594; more structural material per system'.format(ao)
+            elif cat == 'MMS' and v > 0:
+                mix_ctx = 'Prefab/Column Gen2 rate or type-mix shift'
+            elif cat == 'Cables' and ao > 0.08 and v > 0:
+                mix_ctx = 'Routing length scales with AoS {:+.2f}kW'.format(ao)
+            elif cat == 'Cables' and v > 0:
+                mix_ctx = 'DC/AC cable rate movement'
+            elif cat == 'Module':
+                mix_ctx = 'Module procurement rate'
             elif sku_ctx and cat in sku_ctx:
-                mix_note = ' [{}]'.format(sku_ctx[cat])
+                mix_ctx = sku_ctx[cat]
             else:
-                mix_note = ''
+                mix_ctx = 'rate/mix movement'
             sign = '+' if v > 0 else '&#8722;'
-            cat_strs.append('{} {}{:.3f}/Wp{}'.format(cat, sign, abs(v), mix_note))
+            cat_strs.append(
+                '<b>{}</b>&nbsp;{}{:.3f}/Wp&nbsp;<span style="color:#6B7280;font-size:9.5px">'
+                '({})</span>'.format(cat, sign, abs(v), mix_ctx))
         if cat_strs:
             parts.append('COGS mix: {}'.format('; '.join(cat_strs)))
 
-    # ── Lever 3: System-size / product mix (AoS) when COGS is contained ──
+    # ── Lever C: Product/system-size mix (AoS) when COGS is contained ──
     if abs(ao) > 0.15 and abs(ck_wp) <= 0.02:
-        parts.append('AoS {:+.2f}kW ({:.2f}&#8594;{:.2f}kW) &#8212; system-size mix shift'.format(
-            ao, prev['aos'], curr['aos']))
+        parts.append(
+            'AoS {:+.2f}kW ({:.2f}&#8594;{:.2f}kW) &#8212; product mix shift, COGS contained'.format(
+                ao, prev['aos'], curr['aos']))
 
-    # ── Stable fallback ───────────────────────────────────────────────────
+    # ── Stable fallback ───────────────────────────────────────────
     if not parts:
         sub = []
         if abs(rv) > 0.1:      sub.append('Rev/Wp {:+.2f}/Wp'.format(rv))
@@ -382,8 +399,8 @@ def get_driver(curr, prev, sku_ctx=None):
                     'All levers &lt;0.5% change &#8212; stable'
         return narrative, dict(d, cat_d=cat_d), narrative
 
-    # ── GM outcome (data observation, not action) ─────────────────────────
-    parts.append('&#8594; {}{:.2f}pp GM'.format('+' if gm_d>=0 else '', gm_d))
+    # ── GM outcome observation ────────────────────────────────────
+    parts.append('&#8594;&nbsp;<b>{}{:.2f}pp GM</b>'.format('+' if gm_d>=0 else '', gm_d))
     narrative = '; '.join(parts)
 
     types = []
@@ -429,176 +446,236 @@ def gmcell(pct, fw='600'):
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-#  PREMIUM LIGHT MOBILE-FIRST CSS — Sky Blue Header Edition
+#  PREMIUM CSS
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 CSS = """
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap');
-
 :root{
-  --primary:#3B82F6;
-  --primary-light:#60A5FA;
-  --bg:#F5F7FB;
-  --card:#FFFFFF;
-  --border:#E5E7EB;
-  --text:#1F2937;
-  --sub:#6B7280;
-  --green:#16A34A;
-  --red:#DC2626;
-  --orange:#F59E0B;
+  --black:#0A0A0A;--ink:#0F172A;--slate:#1E293B;
+  --green:#047857;--green-bg:#D1FAE5;--green-text:#065F46;
+  --red:#B91C1C;--red-bg:#FEE2E2;--red-text:#7F1D1D;
+  --amber:#92400E;--amber-bg:#FEF3C7;--amber-text:#78350F;
+  --blue:#1D4ED8;--blue-bg:#DBEAFE;--blue-text:#1E3A8A;
+  --purple:#6D28D9;--purple-bg:#EDE9FE;--purple-text:#4C1D95;
+  --teal:#0E7490;--teal-bg:#CFFAFE;--teal-text:#164E63;
+  --mid:#64748B;--border:#E2E8F0;--surface:#F8FAFC;
 }
-
-/* RESET */
 *{box-sizing:border-box;margin:0;padding:0}
 body{
-  font-family:system-ui,-apple-system,Segoe UI,Roboto;
-  background:var(--bg);
-  color:var(--text);
-  padding:16px;
+  font-family:'DM Sans',system-ui,-apple-system,sans-serif;
+  background:#F0F2F5;color:var(--ink);font-size:13px;
+  padding:24px 16px 48px;line-height:1.5;
+  -webkit-text-size-adjust:100%;
 }
+.page{max-width:900px;margin:0 auto}
 
-/* CONTAINER */
-.page{
-  max-width:900px;
-  margin:auto;
-  background:var(--card);
-  border-radius:12px;
-  overflow:hidden;
-  border:1px solid var(--border);
-}
-
-/* HEADER (SKY BLUE CLEAN) */
+/* ── HEADER ── */
 .header{
-  background:linear-gradient(90deg,#3B82F6,#2563EB);
-  color:white;
-  padding:18px 20px;
+  background:var(--ink);border-radius:16px 16px 0 0;
+  padding:28px 32px 24px;color:#fff;
+  position:relative;overflow:hidden;
 }
-
+.header::before{
+  content:'';position:absolute;top:-40px;right:-40px;
+  width:200px;height:200px;border-radius:50%;
+  background:rgba(255,255,255,.04);
+}
+.header::after{
+  content:'';position:absolute;bottom:-60px;right:60px;
+  width:120px;height:120px;border-radius:50%;
+  background:rgba(255,255,255,.03);
+}
+.eyebrow{
+  font-family:'DM Mono',monospace;
+  font-size:10px;letter-spacing:2px;text-transform:uppercase;
+  color:rgba(255,255,255,.45);margin-bottom:8px;
+}
 .header h1{
-  font-size:18px;
-  font-weight:700;
-  margin-bottom:4px;
+  font-size:22px;font-weight:800;letter-spacing:-.4px;
+  line-height:1.2;max-width:640px;margin-bottom:6px;
 }
-
 .header-meta{
-  font-size:11px;
-  opacity:0.9;
+  font-size:11px;color:rgba(255,255,255,.4);
+  font-family:'DM Mono',monospace;margin-bottom:20px;
 }
+.badges{display:flex;flex-wrap:wrap;gap:8px}
+.badge{
+  display:inline-flex;align-items:center;gap:4px;
+  background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);
+  color:rgba(255,255,255,.9);font-size:10.5px;font-weight:600;
+  padding:4px 12px;border-radius:20px;letter-spacing:.2px;white-space:nowrap;
+}
+.badge.hi{background:rgba(0,135,90,.25);border-color:rgba(0,215,140,.3);color:#4FFFB0}
+.badge.warn{background:rgba(192,57,43,.2);border-color:rgba(255,100,80,.3);color:#FF9090}
 
-/* SECTION */
+/* validation banner removed */
+
+/* ── SECTION ── */
 .section{
-  padding:18px;
-  border-top:1px solid var(--border);
+  background:#fff;border:1px solid var(--border);border-top:none;
+  padding:24px 28px;
 }
+.section:last-child{border-radius:0 0 16px 16px}
+.sec-header{display:flex;align-items:baseline;gap:8px;margin-bottom:18px}
+.sec-title{font-size:8.5px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--mid)}
+.sec-sub{font-size:10px;color:#9CA3AF}
 
-.sec-title{
-  font-size:11px;
-  font-weight:700;
-  color:#6B7280;
-  letter-spacing:1px;
-  margin-bottom:12px;
-}
-
-/* KPI GRID */
-.snap-grid{
-  display:grid;
-  grid-template-columns:repeat(4,1fr);
-  gap:12px;
-}
-
+/* ── EXEC SNAPSHOT ── */
+.snap-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
 .snap-card{
-  background:var(--card);
-  border:1px solid var(--border);
-  border-radius:10px;
-  padding:14px;
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:12px;padding:16px 18px;
 }
-
 .snap-label{
-  font-size:10px;
-  color:var(--sub);
-  margin-bottom:6px;
-  display:block;
+  font-size:8px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;
+  color:#9CA3AF;display:block;margin-bottom:8px;
 }
+.snap-val{font-size:26px;font-weight:800;letter-spacing:-.6px;display:block;line-height:1;margin-bottom:6px}
+.snap-delta{font-size:10px;color:var(--mid)}
+.snap-pill{display:inline-block;font-size:9px;font-weight:700;padding:2px 8px;border-radius:10px;margin-bottom:8px}
+.green-pill{background:var(--green-bg);color:var(--green)}
+.red-pill{background:var(--red-bg);color:var(--red)}
+.amber-pill{background:var(--amber-bg);color:var(--amber)}
 
-.snap-val{
-  font-size:20px;
-  font-weight:700;
-}
-
-.snap-delta{
-  font-size:10px;
-  margin-top:4px;
-  color:var(--sub);
-}
-
-/* KPI COLORS */
-.green{color:var(--green)}
-.red{color:var(--red)}
-.orange{color:var(--orange)}
-
-/* TABLE */
-.data-table{
-  width:100%;
-  border-collapse:collapse;
-  font-size:12px;
-}
-
+/* ── DATA TABLE ── */
+.table-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;width:100%}
+.data-table{width:100%;border-collapse:collapse;font-size:11.5px;min-width:480px}
+.data-table thead tr{background:#F8FAFC}
 .data-table th{
-  text-align:left;
-  font-size:10px;
-  color:#6B7280;
-  padding:8px;
-  border-bottom:1px solid var(--border);
+  padding:9px 12px;font-size:8.5px;font-weight:700;
+  color:#6B7280;text-transform:uppercase;letter-spacing:.8px;
+  border-bottom:2px solid var(--border);text-align:left;white-space:nowrap;
+}
+.data-table th.R{text-align:right}
+.data-table td{padding:9px 12px;border-bottom:1px solid #F3F4F6;color:#374151;vertical-align:top}
+.data-table td.R{text-align:right;font-family:'DM Mono',monospace;font-size:11px}
+.data-table td.mono{font-family:'DM Mono',monospace;font-size:11px}
+.data-table tbody tr:hover td{background:#FAFAFA}
+.dot{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:7px;vertical-align:middle}
+.up{color:var(--red);font-weight:700}
+.dn{color:var(--green);font-weight:700}
+.neutral{color:#9CA3AF}
+.up-good{color:var(--green);font-weight:700}
+
+/* ── DRIVER / SIGNAL COLUMN ── */
+.driver-chip{display:inline-block;font-size:9.5px;color:#1E293B;line-height:1.9;max-width:440px;white-space:normal}
+.signal{font-size:10.5px;color:#1E293B;line-height:1.9;vertical-align:top}
+.tag-cogs{display:inline-block;font-size:8.5px;font-weight:800;padding:2px 8px;border-radius:6px;background:#FEF3C7;color:#78350F;border:1px solid #FCD34D;margin:0 4px 2px 0;letter-spacing:.2px}
+.tag-rev{display:inline-block;font-size:8.5px;font-weight:800;padding:2px 8px;border-radius:6px;background:#FEE2E2;color:#7F1D1D;border:1px solid #FCA5A5;margin:0 4px 2px 0;letter-spacing:.2px}
+.tag-ok{display:inline-block;font-size:8.5px;font-weight:800;padding:2px 8px;border-radius:6px;background:#D1FAE5;color:#065F46;border:1px solid #6EE7B7;margin:0 4px 2px 0;letter-spacing:.2px}
+.tag-price{display:inline-block;font-size:8.5px;font-weight:800;padding:2px 8px;border-radius:6px;background:#E0E7FF;color:#3730A3;border:1px solid #A5B4FC;margin:0 4px 2px 0;letter-spacing:.2px}
+.tag-mix{display:inline-block;font-size:8.5px;font-weight:800;padding:2px 8px;border-radius:6px;background:#CFFAFE;color:#164E63;border:1px solid #67E8F9;margin:0 4px 2px 0;letter-spacing:.2px}
+.tag-warn{display:inline-block;font-size:8.5px;font-weight:800;padding:2px 8px;border-radius:6px;background:#FEF3C7;color:#78350F;border:1px solid #FCD34D;margin:0 4px 2px 0;letter-spacing:.2px}
+.sig-ctx{font-size:9.5px;color:#475569;font-style:italic}
+
+/* ── CLUSTER TABLE — COMPACT 5-COLUMN ── */
+.cluster-wrap{border-radius:10px;overflow:hidden;border:1px solid var(--border);overflow-x:auto;-webkit-overflow-scrolling:touch}
+.cluster-wrap .data-table{min-width:560px}
+.group-row td{
+  font-weight:800;font-size:9px;text-transform:uppercase;letter-spacing:1.2px;
+  padding:7px 14px;border-top:none;
+}
+.group-row.declining td{background:#7F1D1D;color:#FECACA;border-top:2px solid #7F1D1D}
+.group-row.improving td{background:#065F46;color:#A7F3D0;border-top:2px solid #065F46}
+.group-row.stable td{background:#1E3A5F;color:#BFDBFE;border-top:2px solid #1E3A5F}
+.group-row.nascent td{background:#3B1FA8;color:#DDD6FE;border-top:2px solid #3B1FA8}
+
+/* GM% cells — 4-tier colour scale (high contrast) */
+.gm-cell-hi  {background:#059669;color:#fff;font-weight:800;text-align:center;padding:9px 12px;font-family:'DM Mono',monospace;font-size:12px}
+.gm-cell-mid {background:#D97706;color:#fff;font-weight:800;text-align:center;padding:9px 12px;font-family:'DM Mono',monospace;font-size:12px}
+.gm-cell-lo  {background:#DC2626;color:#fff;font-weight:800;text-align:center;padding:9px 12px;font-family:'DM Mono',monospace;font-size:12px}
+.gm-cell-crit{background:#7C0D0D;color:#FFD0D0;font-weight:800;text-align:center;padding:9px 12px;font-family:'DM Mono',monospace;font-size:12px;letter-spacing:.5px}
+
+/* Cluster name + state inline */
+.cluster-name{font-weight:700;font-size:12px;display:block}
+.state-tag{font-size:9px;color:#9CA3AF;font-weight:400}
+
+/* Cluster legend */
+.cluster-legend{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
+.cluster-legend-label{font-size:9px;color:#6B7280;font-weight:700;text-transform:uppercase;letter-spacing:.8px;margin-right:4px}
+.leg-pill{display:inline-flex;align-items:center;gap:5px;font-size:9px;font-weight:700;padding:3px 10px;border-radius:8px}
+.leg-hi  {background:#059669;color:#fff}
+.leg-mid {background:#D97706;color:#fff}
+.leg-lo  {background:#DC2626;color:#fff}
+.leg-crit{background:#7C0D0D;color:#FFD0D0}
+
+/* ── SKU CARDS ── */
+.sku-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+.sku-card{border:1px solid var(--border);border-radius:10px;padding:14px 16px;background:#fff}
+.sku-card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.sku-cat{font-weight:800;font-size:13px;color:var(--ink)}
+.sku-delta{font-size:12px;font-weight:800;font-family:'DM Mono',monospace}
+.sku-rc{
+  font-size:9.5px;color:#9CA3AF;font-style:italic;
+  border-left:2px solid var(--border);padding-left:8px;margin-bottom:8px;line-height:1.6;
+}
+.sku-line{font-size:10.5px;color:#374151;line-height:1.9;margin-bottom:2px}
+.sku-gm-badge{display:inline-block;font-size:9px;font-weight:700;padding:1px 7px;border-radius:6px;margin-left:8px}
+
+/* ── COGS HEADLINE BANNER ── */
+.cogs-banner{
+  background:#F0F9FF;border:1px solid #BAE6FD;border-radius:8px;
+  padding:11px 16px;margin-bottom:14px;
+  font-size:11.5px;font-weight:700;color:#0369A1;line-height:1.5;
 }
 
-.data-table td{
-  padding:10px 8px;
-  border-bottom:1px solid #F1F5F9;
+/* ── GM BRIDGE ── */
+.bridge-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:2px}
+.bridge{display:flex;align-items:stretch;flex-wrap:nowrap;gap:0;margin:12px 0;font-family:'DM Mono',monospace;font-size:11px;min-width:min-content}
+.bridge-box{padding:8px 14px;text-align:center;min-width:80px}
+.bridge-box.start{background:var(--surface);border:1px solid var(--border);border-radius:8px 0 0 8px}
+.bridge-box.end{background:var(--surface);border:1px solid var(--border);border-radius:0 8px 8px 0}
+.bridge-item{background:var(--red-bg);border:1px solid #FECACA;padding:8px 12px;font-size:10px;border-left:none;min-width:76px}
+.bridge-item.pos{background:var(--green-bg);border-color:#BBF7D0}
+.bridge-label{font-size:8.5px;color:var(--mid);display:block;margin-bottom:2px;font-family:'DM Sans',sans-serif;white-space:nowrap}
+.bridge-val{font-size:13px;font-weight:700;display:block}
+
+/* ── KPI + TODAY TABLES ── */
+.kgrid,.today-grid{width:100%;border-collapse:separate;border-spacing:8px}
+.ec,.kc,.tc{border-radius:10px;padding:13px 15px;vertical-align:top;border:1px solid var(--border);background:var(--surface)}
+.kc-label,.tc-label{display:block;font-size:8px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#9CA3AF;margin-bottom:6px}
+.kc-val,.tc-today{font-size:22px;font-weight:900;letter-spacing:-.4px;display:block;line-height:1;margin-bottom:5px;color:#111827}
+.kc-sub,.tc-prev{font-size:10px;color:#6B7280;display:block;line-height:1.5}
+.kc-trend{display:block;margin-top:4px}
+
+/* ── PRODUCT MIX BAR ── */
+.mix-bar{height:24px;border-radius:8px;overflow:hidden;display:flex;margin-bottom:12px;gap:1px}
+
+/* ── FOOTER ── */
+.footer{
+  background:var(--surface);border:1px solid var(--border);border-top:none;
+  border-radius:0 0 16px 16px;padding:14px 28px;
+  text-align:center;font-size:9px;color:#9CA3AF;
+  font-family:'DM Mono',monospace;letter-spacing:.3px;
 }
 
-/* CARDS ROW (LATEST DAY STYLE) */
-.kgrid, .today-grid{
-  width:100%;
-  border-spacing:10px;
-}
-
-.kc, .tc{
-  border:1px solid var(--border);
-  border-radius:10px;
-  padding:12px;
-  background:white;
-}
-
-.kc-label, .tc-label{
-  font-size:10px;
-  color:var(--sub);
-}
-
-.kc-val, .tc-today{
-  font-size:18px;
-  font-weight:700;
-}
-
-.kc-sub, .tc-prev{
-  font-size:10px;
-  color:var(--sub);
-}
-
-/* MOBILE FIX */
+/* ════════════════════════════════════════════════════════════════
+   MOBILE — ≤640px
+   ════════════════════════════════════════════════════════════════ */
 @media(max-width:640px){
-  .snap-grid{
-    grid-template-columns:1fr 1fr;
-  }
+  body{padding:8px 8px 32px}
+  .header{padding:20px 16px 16px;border-radius:12px 12px 0 0}
+  .header h1{font-size:16px;letter-spacing:-.2px}
+  .header-meta{font-size:9.5px;margin-bottom:14px}
+  .eyebrow{font-size:9px}
+  .badge{font-size:9px;padding:3px 9px}
+  .section{padding:16px 14px}
+  /* 2-col snap grid */
+  .snap-grid{grid-template-columns:1fr 1fr;gap:8px}
+  .snap-val{font-size:20px}
+  .snap-card{padding:12px 12px}
+  /* 1-col sku grid */
+  .sku-grid{grid-template-columns:1fr}
+  /* kpi tables → 2-col block */
+  .kgrid,.kgrid tbody,.kgrid tr,
+  .today-grid,.today-grid tbody,.today-grid tr{display:block!important;width:100%!important}
+  .kc,.tc{display:inline-block!important;width:calc(50% - 10px)!important;margin:4px!important;vertical-align:top;padding:10px 10px!important}
+  .kc-val,.tc-today{font-size:17px!important}
 
-  .kgrid tr, .today-grid tr{
-    display:flex;
-    flex-wrap:wrap;
-  }
-
-  .kc, .tc{
-    width:48%;
-  }
+  .driver-chip{max-width:100%;font-size:9px}
+  .cluster-legend{gap:5px}
+  .leg-pill{font-size:8px;padding:2px 7px}
+  .footer{padding:12px 14px;font-size:8px}
 }
-
 """
 
 
@@ -865,43 +942,34 @@ def build(data):
             '</td>'
         ).format(label, vc, val, sub, trend_html)
 
-    def kcard_div(label, val, sub, vc='#111827', trend_html=''):
-        return (
-            '<div class="kc">'
-            '<span class="kc-label">{}</span>'
-            '<span class="kc-val" style="color:{}">{}</span>'
-            '<span class="kc-sub">{}</span>'
-            '<span class="kc-trend">{}</span>'
-            '</div>'
-        ).format(label, vc, val, sub, trend_html)
-
     kpi_html = (
-        '<div class="kgrid-wrap">'
-        + kcard_div('Installations MTD', '{:,}'.format(mtd['n']),
+        '<table class="kgrid"><tr>'
+        + kcard('Installations MTD', '{:,}'.format(mtd['n']),
                 'vs {:,} {} (1&#8211;{})'.format(pm['n'], prev_lbl, pm_day),
                 trend_html=dpct(mtd['n'], pm['n']))
-        + kcard_div('kW Installed MTD', '{:,.0f} kW'.format(mtd['kw']),
+        + kcard('kW Installed MTD', '{:,.0f} kW'.format(mtd['kw']),
                 'vs {:,.0f} kW {}'.format(pm['kw'], prev_lbl),
                 trend_html=dpct(mtd['kw'], pm['kw']))
-        + kcard_div('Gross Margin', '{:.2f}%'.format(mtd['gm']),
+        + kcard('Gross Margin', '{:.2f}%'.format(mtd['gm']),
                 'vs {:.2f}% {}'.format(pm['gm'], prev_lbl),
                 vc=gmc(mtd['gm']), trend_html=dpp(gm_trend))
-        + kcard_div('Revenue MTD', fc(mtd['rev']),
+        + kcard('Revenue MTD', fc(mtd['rev']),
                 'vs {} {}'.format(fc(pm['rev']), prev_lbl),
                 trend_html=dpct(mtd['rev'], pm['rev']))
-        + kcard_div('Avg System Size', '{:.2f} kW'.format(mtd['aos']),
+        + '</tr><tr>'
+        + kcard('Avg System Size', '{:.2f} kW'.format(mtd['aos']),
                 'vs {:.2f} kW {}'.format(pm['aos'], prev_lbl),
                 trend_html=dpval(mtd['aos']-pm['aos'], 'kW'))
-        + kcard_div('Avg Order Value', fc(mtd['aov']),
+        + kcard('Avg Order Value', fc(mtd['aov']),
                 'vs {} {}'.format(fc(pm['aov']), prev_lbl),
                 trend_html=dpct(mtd['aov'], pm['aov']))
-        + kcard_div('Rev / Wp', '&#8377;{:.2f}'.format(mtd['rev_wp']),
+        + kcard('Rev / Wp', '&#8377;{:.2f}'.format(mtd['rev_wp']),
                 'vs &#8377;{:.2f} {}'.format(pm['rev_wp'], prev_lbl),
                 trend_html=dpval(rev_wp_d, '&#8377;/Wp'))
-        + kcard_div('Abs Gross Margin', fc(mtd['abs_gm']),
+        + kcard('Abs Gross Margin', fc(mtd['abs_gm']),
                 'vs {} {}'.format(fc(pm['abs_gm']), prev_lbl),
                 trend_html=dpct(mtd['abs_gm'], pm['abs_gm']))
-        + '</div>'
+        + '</tr></table>'
     )
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -916,28 +984,19 @@ def build(data):
             '</td>'
         ).format(label, vc, today_val, prev_val, delta_html)
 
-    def tcard_div(label, today_val, prev_val, delta_html, vc='#111827'):
-        return (
-            '<div class="tc">'
-            '<span class="tc-label">{}</span>'
-            '<span class="tc-today" style="color:{}">{}</span>'
-            '<span class="tc-prev">vs {} yesterday &nbsp; {}</span>'
-            '</div>'
-        ).format(label, vc, today_val, prev_val, delta_html)
-
     today_html = (
-        '<div class="today-grid-wrap">'
-        + tcard_div('Installations', str(lat['n']), str(prv['n']),
+        '<table class="today-grid"><tr>'
+        + tcard('Installations', str(lat['n']), str(prv['n']),
                 dpct(lat['n'], prv['n']) if prv['n'] else '')
-        + tcard_div('kW Installed', '{:.1f} kW'.format(lat['kw']), '{:.1f} kW'.format(prv['kw']),
+        + tcard('kW Installed', '{:.1f} kW'.format(lat['kw']), '{:.1f} kW'.format(prv['kw']),
                 dpval(lat['kw']-prv['kw'], 'kW') if prv['kw'] else '')
-        + tcard_div('Rev / Wp', '&#8377;{:.2f}'.format(lat['rev_wp']), '&#8377;{:.2f}'.format(prv['rev_wp']),
+        + tcard('Rev / Wp', '&#8377;{:.2f}'.format(lat['rev_wp']), '&#8377;{:.2f}'.format(prv['rev_wp']),
                 dpval(lat['rev_wp']-prv['rev_wp'], '&#8377;/Wp') if prv['rev_wp'] else '')
-        + tcard_div('Avg System Size', '{:.2f} kW'.format(lat['aos']), '{:.2f} kW'.format(prv['aos']),
+        + tcard('Avg System Size', '{:.2f} kW'.format(lat['aos']), '{:.2f} kW'.format(prv['aos']),
                 dpval(lat['aos']-prv['aos'], 'kW') if prv['aos'] else '')
-        + tcard_div('GM %', '{:.1f}%'.format(lat['gm']), '{:.1f}%'.format(prv['gm']),
+        + tcard('GM %', '{:.1f}%'.format(lat['gm']), '{:.1f}%'.format(prv['gm']),
                 dpp(lat['gm']-prv['gm']) if prv['gm'] else '', vc=gmc(lat['gm']))
-        + '</div>'
+        + '</tr></table>'
     )
 
 
@@ -1102,20 +1161,31 @@ def build(data):
         top_rising  = max(cat_d.items(), key=lambda x: x[1]) if cat_d else None
         top_falling = min(cat_d.items(), key=lambda x: x[1]) if cat_d else None
 
+        # Primary tag: reflects the dominant lever for GM movement
         if 'price_dn' in types:
             chip_tag = '<span class="tag-rev">Rev &#8722;&#8377;{:.2f}/Wp</span>'.format(abs(rv_d))
-        elif 'cogs_up' in types and top_rising:
-            chip_tag = '<span class="tag-cogs">{} +&#8377;{:.3f}/Wp</span>'.format(
-                top_rising[0], abs(top_rising[1]))
-        elif 'cogs_dn' in types and top_falling:
-            chip_tag = '<span class="tag-ok">{} &#8722;&#8377;{:.3f}/Wp</span>'.format(
-                top_falling[0], abs(top_falling[1]))
         elif 'price_up' in types:
             chip_tag = '<span class="tag-ok">Rev +&#8377;{:.2f}/Wp</span>'.format(rv_d)
+        elif 'cogs_up' in types and top_rising:
+            # Show COGS category + context about which lever (rate/mix/AoS)
+            cat_name, cat_val = top_rising
+            ao_val = det.get('aos_d', 0)
+            if cat_name in ('MMS', 'Cables') and ao_val > 0.1:
+                ctx = 'AoS{:+.2f}kW'.format(ao_val)
+            elif cat_name == 'Inverter':
+                ctx = '3Ph mix'
+            else:
+                ctx = 'rate/mix'
+            chip_tag = '<span class="tag-cogs">{} +&#8377;{:.3f}/Wp</span> <span class="tag-mix">{}</span>'.format(
+                cat_name, abs(cat_val), ctx)
+        elif 'cogs_dn' in types and top_falling:
+            cat_name, cat_val = top_falling
+            chip_tag = '<span class="tag-ok">{} &#8722;&#8377;{:.3f}/Wp</span>'.format(
+                cat_name, abs(cat_val))
         elif r['gm_d'] > 0.15:
-            chip_tag = '<span class="tag-ok">Improving</span>'
+            chip_tag = '<span class="tag-ok">&#9650; Improving</span>'
         elif abs(r['gm_d']) < 0.15:
-            chip_tag = '<span class="tag-ok">Stable</span>'
+            chip_tag = '<span class="tag-ok">&#8594; Stable</span>'
         else:
             chip_tag = ''
 
@@ -1159,11 +1229,13 @@ def build(data):
     # ── Legend ──────────────────────────────────────────────────
     cluster_legend_html = (
         '<div class="cluster-legend">'
-        '<span class="cluster-legend-label">GM%</span>'
+        '<span class="cluster-legend-label">GM% Scale</span>'
         '<span class="leg-pill leg-hi">&#8805; 44% Outperforming</span>'
         '<span class="leg-pill leg-mid">42&#8211;44% On-target</span>'
         '<span class="leg-pill leg-lo">40&#8211;42% Below target</span>'
-        '<span class="leg-pill leg-crit">&lt;40% Critical</span>'
+        '<span class="leg-pill leg-crit">&lt; 40% Floor breach</span>'
+        '<span style="font-size:8.5px;color:#64748B;margin-left:8px;font-style:italic">'
+        '&#9679; Signal column shows: realization lever &middot; COGS mix lever &middot; product mix lever</span>'
         '</div>'
     )
 
@@ -1179,16 +1251,16 @@ def build(data):
 
     cl_tbody = ''
     if declining:
-        cl_tbody += '<tr class="group-row"><td colspan="5">&#9660; Declining vs {} &#8212; needs attention</td></tr>'.format(prev_lbl)
-        cl_tbody += ''.join(cl_row(r,'#FFFBFB') for r in declining)
+        cl_tbody += '<tr class="group-row declining"><td colspan="5">&#9660;&nbsp; Declining vs {} &mdash; GM compression observed</td></tr>'.format(prev_lbl)
+        cl_tbody += ''.join(cl_row(r,'#FFF5F5') for r in declining)
     if improving:
-        cl_tbody += '<tr class="group-row"><td colspan="5">&#9650; Improving vs {}</td></tr>'.format(prev_lbl)
-        cl_tbody += ''.join(cl_row(r,'#F9FFFA') for r in improving)
+        cl_tbody += '<tr class="group-row improving"><td colspan="5">&#9650;&nbsp; Improving vs {} &mdash; GM expansion observed</td></tr>'.format(prev_lbl)
+        cl_tbody += ''.join(cl_row(r,'#F0FFF8') for r in improving)
     if stable_cl:
-        cl_tbody += '<tr class="group-row"><td colspan="5">&#8594; Stable (within &plusmn;0.3pp)</td></tr>'
+        cl_tbody += '<tr class="group-row stable"><td colspan="5">&#8594;&nbsp; Stable &mdash; within &plusmn;0.3pp</td></tr>'
         cl_tbody += ''.join(cl_row(r) for r in stable_cl)
     if nascent:
-        cl_tbody += '<tr class="group-row"><td colspan="5">&#9733; New / growing clusters</td></tr>'
+        cl_tbody += '<tr class="group-row nascent"><td colspan="5">&#9733;&nbsp; Emerging clusters &mdash; growing volume</td></tr>'
         cl_tbody += ''.join(cl_row(r,'#FAF5FF') for r in nascent)
 
     cl_html = (
@@ -1217,49 +1289,33 @@ def build(data):
         warn_badges += ' <span class="badge warn">{} {:+.2f}pp &#9888;</span>'.format(
             r['cluster'], r['gm_d'])
 
-    # Data validation
+    # COGS diff still computed for footer use
     cogs_sum_calc = mtd['mod']+mtd['inv']+mtd['mms']+mtd['cab']+mtd['mtr']+mtd['ic']+mtd['oth']
     cogs_diff_val = abs(mtd['cogs'] - cogs_sum_calc)
-    validation_bar = (
-        '<div class="validation-bar">'
-        '<strong>&#128269; DATA VALIDATION COMPLETE</strong>&nbsp;&nbsp;'
-        '<span class="vcheck">&#10004; COGS sum = mod+inv+mms+cab+mtr+ic+oth '
-        '(diff: &#8377;{:.0f} MTD)</span>'
-        '<span class="vcheck">&#10004; Rev/Wp = Rev &#247; (kW&#215;1000) cross-checked</span>'
-        '<span class="vcheck">&#10004; GM% = (Rev&#8722;COGS) &#247; Rev verified</span>'
-        '<span class="vcheck">&#10004; SKU &#8377;/Wp reconciled to COGS table</span>'
-        '</div>'
-    ).format(cogs_diff_val)
 
     html = '''<!DOCTYPE html><html lang="en"><head>''' + '''
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,400;0,500;1,400&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,600;0,9..40,800;1,9..40,400&display=swap" rel="stylesheet">
 <style>''' + CSS + '''</style></head><body><div class="page">''' + ''.join([
 
         # ── HEADER
-        '<div class="header">',
-        '<div class="header-top-bar">',
-        '<div class="eyebrow">&#9728; Solar Square &nbsp;&middot;&nbsp; B2C GM Report &nbsp;&middot;&nbsp; Analytics</div>',
-        '<span class="header-logo-pill">&#128200; Executive Report</span>',
-        '</div>',
+        '<div class="header" style="background:linear-gradient(135deg,#0F172A 0%,#1E293B 60%,#0F2744 100%)">',
+        '<div class="eyebrow">&#9728;&#65039; Solar Square &nbsp;&middot;&nbsp; B2C GM Report &nbsp;&middot;&nbsp; Analytics</div>',
         '<h1>', headline, '</h1>',
         '<div class="header-meta">Data through ', latest.strftime('%d %b %Y'),
         ' &nbsp;&middot;&nbsp; {} MTD vs full {} '.format(curr_lbl[:3], prev_lbl),
         str(pm_last.year),
-        ' &nbsp;&middot;&nbsp; ', now_str, '</div>',
+        ' &nbsp;&middot;&nbsp; Generated ', now_str, '</div>',
         '<div class="badges">',
-        '<span class="badge hi">&#10004; Validated &amp; reconciled</span>',
-        ' <span class="badge">&#127968; {:,} installs MTD</span>'.format(mtd['n']),
-        ' <span class="badge">&#9889; {:,.1f} kW</span>'.format(mtd['kw']),
-        ' <span class="badge">&#128200; GM {:.2f}%</span>'.format(mtd['gm']),
-        ' <span class="badge">&#8377; Rev/Wp {:.2f}</span>'.format(mtd['rev_wp']),
-        ' <span class="badge">&#128336; AoS {:.2f} kW</span>'.format(mtd['aos']),
+        '<span class="badge hi">&#10004; All numbers validated &amp; reconciled</span>',
+        ' <span class="badge">{:,} installs MTD</span>'.format(mtd['n']),
+        ' <span class="badge">{:,.1f} kW installed</span>'.format(mtd['kw']),
+        ' <span class="badge">GM {:.2f}%</span>'.format(mtd['gm']),
+        ' <span class="badge">Rev/Wp &#8377;{:.2f}</span>'.format(mtd['rev_wp']),
+        ' <span class="badge">AoS {:.2f} kW</span>'.format(mtd['aos']),
         warn_badges,
         '</div></div>',
-
-        # ── VALIDATION BANNER
-        validation_bar,
 
         # ── SECTIONS
         section('Exec Snapshot', '{} MTD vs full {}'.format(curr_lbl[:3], prev_lbl), snap4_html),
