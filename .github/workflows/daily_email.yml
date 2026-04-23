@@ -16,12 +16,6 @@ on:
 jobs:
   send-report:
     runs-on: ubuntu-latest
-    # If the upstream "Sync Data" workflow FAILED, don't bother sending an
-    # email with stale numbers. (workflow_dispatch / schedule runs have a
-    # null conclusion, so they still pass this gate.)
-    if: >
-      github.event_name != 'workflow_run' ||
-      github.event.workflow_run.conclusion == 'success'
 
     steps:
       - name: Checkout repo
@@ -32,40 +26,9 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Show what we're about to send
-        run: |
-          echo "Trigger      : ${{ github.event_name }}"
-          echo "Commit       : ${{ github.sha }}"
-          echo "Run ID       : ${{ github.run_id }}"
-          ls -lh projects.json.gz 2>/dev/null || echo "projects.json.gz not found in repo root"
-
-      - name: Generate & Send Daily GM Report
+      - name: Send Daily GM Report
         env:
-          # ── SMTP ──
-          SMTP_HOST:      smtp.gmail.com
-          SMTP_PORT:      '587'
-          GMAIL_USER:     purushottam.shinde@solarsquare.in
           GMAIL_PASSWORD: ${{ secrets.GMAIL_PASSWORD }}
-          EMAIL_FROM:     Solar Square Analytics <purushottam.shinde@solarsquare.in>
-
-          # ── Recipients ──
-          REPORT_TO:      devika.g@solarsquare.in
-          # Add more recipients by uncommenting + filling these:
-          # REPORT_CC:    leader1@solarsquare.in, leader2@solarsquare.in
-          # REPORT_BCC:   analytics-archive@solarsquare.in
-
-          # ── Misc ──
-          EMAIL_SUBJECT_PREFIX: '[Solar Square]'
+          GMAIL_USER: purushottam.shinde@solarsquare.in
+          REPORT_TO: devika.g@solarsquare.in
         run: python send_daily_report.py
-
-      # Keep the rendered HTML as a workflow artifact for 14 days so you can
-      # eyeball the email body straight from the Actions run page without
-      # checking your inbox.
-      - name: Upload HTML preview artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: daily_gm_report_html
-          path: daily_gm_report.html
-          retention-days: 14
-          if-no-files-found: ignore
