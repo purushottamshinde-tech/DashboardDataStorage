@@ -643,14 +643,18 @@ body{
 }
 
 /* ── KPI TILE GRID — 4-col desktop / 2-col mobile ── */
-.kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
-.kpi-tile{
-  border-radius:12px;padding:16px 18px;
-  border:1px solid #E2E8F0;background:#fff;
-  display:flex;flex-direction:column;gap:4px;
-  box-shadow:0 1px 4px rgba(0,0,0,.04);
+.kpi-grid{
+  display:flex;flex-wrap:wrap;gap:10px;
+  margin-bottom:4px;
 }
-.kpi-label{font-size:8px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:#64748B;background:#F1F5F9;border-radius:4px;padding:2px 6px;margin-bottom:4px;display:inline-block;align-self:flex-start}
+.kpi-tile{
+  border-radius:12px;padding:14px 16px;
+  border:1px solid #E2E8F0;background:#fff;
+  display:flex;flex-direction:column;gap:3px;
+  box-shadow:0 1px 4px rgba(0,0,0,.04);
+  flex:1 1 calc(25% - 8px);min-width:150px;
+}
+.kpi-label{font-size:7.5px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#64748B;background:#F1F5F9;border-radius:4px;padding:2px 6px;margin-bottom:4px;display:inline-block;align-self:flex-start}
 .kpi-val{font-size:26px;font-weight:900;letter-spacing:-.6px;line-height:1.1;color:#0F172A}
 .kpi-sub{font-size:10.5px;color:#64748B;line-height:1.4}
 .kpi-trend{font-size:10.5px;font-weight:700;margin-top:2px}
@@ -692,9 +696,9 @@ body{
   /* 1-col sku grid */
   .sku-grid{grid-template-columns:1fr}
   /* kpi tile grid → 2-col on mobile */
-  .kpi-grid{grid-template-columns:1fr 1fr;gap:8px}
+  .kpi-grid{gap:8px}
+  .kpi-tile{flex:1 1 calc(50% - 6px);min-width:calc(50% - 6px);max-width:calc(50% - 6px);padding:12px 12px}
   .kpi-val{font-size:20px}
-  .kpi-tile{padding:12px 13px}
   /* today table → 2-col block */
   .today-grid,.today-grid tbody,.today-grid tr{display:block!important;width:100%!important}
   .tc{display:inline-block!important;width:calc(50% - 10px)!important;margin:4px!important;vertical-align:top;padding:10px 10px!important}
@@ -1108,15 +1112,20 @@ def build(data):
         return ('up' if positive else 'dn'), arrow
 
     def ktile(label, val, sub, val_color='#0F172A', trend_txt='', trend_cls='neu', accent=''):
-        border = 'border-left:3px solid {};'.format(accent) if accent else ''
+        left_border = 'border-left:3px solid {};'.format(accent) if accent else ''
+        trend_color = '#059669' if trend_cls == 'up' else ('#DC2626' if trend_cls == 'dn' else '#94A3B8')
         return (
-            '<div class="kpi-tile" style="{}">'
-            '<span class="kpi-label">{}</span>'
-            '<span class="kpi-val" style="color:{}">{}</span>'
-            '<span class="kpi-sub">{}</span>'
-            '<span class="kpi-trend {}">{}</span>'
+            '<div class="kpi-tile" style="box-sizing:border-box;{left}">'
+            '<span class="kpi-label" style="font-size:7.5px;font-weight:700;letter-spacing:1px;'
+            'text-transform:uppercase;color:#64748B;background:#F1F5F9;border-radius:4px;'
+            'padding:2px 6px;margin-bottom:4px;display:inline-block">{label}</span>'
+            '<span class="kpi-val" style="font-size:24px;font-weight:900;letter-spacing:-.5px;'
+            'line-height:1.1;color:{vc}">{val}</span>'
+            '<span class="kpi-sub" style="font-size:10px;color:#64748B;line-height:1.4">{sub}</span>'
+            '<span style="font-size:10px;font-weight:700;margin-top:2px;color:{tc}">{trend}</span>'
             '</div>'
-        ).format(border, label, val_color, val, sub, trend_cls, trend_txt)
+        ).format(left=left_border, label=label, vc=val_color, val=val,
+                 sub=sub, tc=trend_color, trend=trend_txt)
 
     # Row 1: Volume · kW · GM% · Revenue
     _vol_d = mtd['n'] - pm['n']
@@ -1224,62 +1233,69 @@ def build(data):
             '</td>'
         ).format(label, vc, today_val, prev_val, delta_html)
 
+    def _day_tile(label, val, val_color, sub, trend_txt, trend_color):
+        return (
+            '<div class="kpi-tile" style="box-sizing:border-box;">'
+            '<span class="kpi-label" style="font-size:7.5px;font-weight:700;letter-spacing:1px;'
+            'text-transform:uppercase;color:#64748B;background:#F1F5F9;border-radius:4px;'
+            'padding:2px 6px;margin-bottom:4px;display:inline-block">{label}</span>'
+            '<span class="kpi-val" style="font-size:24px;font-weight:900;letter-spacing:-.5px;'
+            'line-height:1.1;color:{vc}">{val}</span>'
+            '<span class="kpi-sub" style="font-size:10px;color:#64748B;line-height:1.4">{sub}</span>'
+            '<span style="font-size:10px;font-weight:700;margin-top:2px;color:{tc}">{trend}</span>'
+            '</div>'
+        ).format(label=label, vc=val_color, val=val, sub=sub, tc=trend_color, trend=trend_txt)
+
+    _rwp_d_day = lat['rev_wp'] - prv['rev_wp']
+    _aos_d_day = lat['aos'] - prv['aos']
+    _gm_d_day  = lat['gm'] - prv['gm']
+
     today_html = (
-        '<div class="kpi-section-label" style="margin-bottom:12px">LATEST DAY &mdash; {lat} VS {prv} &nbsp; <span style="font-size:9px;color:#9CA3AF;font-weight:400">Data updated through {lat} &nbsp; Showing {lat} vs {prv}</span></div>'
+        '<div class="kpi-section-label" style="margin-bottom:12px">'
+        'LATEST DAY &mdash; {lat} VS {prv}'
+        ' &nbsp;<span style="font-size:9px;color:#9CA3AF;font-weight:400">'
+        'Data updated through {lat} &nbsp; Showing {lat} vs {prv}</span></div>'
         '<div class="kpi-grid">'
-        '<div class="kpi-tile">'
-        '<span class="kpi-label">Orders &mdash; {lat}</span>'
-        '<span class="kpi-val" style="color:#0F172A">{n}</span>'
-        '<span class="kpi-sub">Prev ({prv}): {pn} &nbsp;&nbsp; MTD: {mtdn:,}</span>'
-        '</div>'
-        '<div class="kpi-tile">'
-        '<span class="kpi-label">kW &mdash; {lat}</span>'
-        '<span class="kpi-val" style="color:#0F172A">{kw:.1f}</span>'
-        '<span class="kpi-sub">Prev: {pkw:.1f} kW &nbsp;&nbsp; MTD: {mtkw:,.0f}</span>'
-        '<span class="kpi-trend {rwpcls}">{rwparr} {rwpd:.3f} &#8377;/Wp</span>'
-        '</div>'
-        '<div class="kpi-tile">'
-        '<span class="kpi-label">Rev/Wp &mdash; {lat}</span>'
-        '<span class="kpi-val" style="color:#0F172A">&#8377;{rwp:.2f}</span>'
-        '<span class="kpi-sub">Prev ({prv}): &#8377;{prwp:.2f}</span>'
-        '<span class="kpi-trend {rwpcls}">{rwparr} {rwpd:.3f} &#8377;/Wp</span>'
-        '</div>'
-        '<div class="kpi-tile">'
-        '<span class="kpi-label">AoS &mdash; {lat}</span>'
-        '<span class="kpi-val" style="color:#0F172A">{aos:.2f} kW</span>'
-        '<span class="kpi-sub">Prev: {paos:.2f} kW</span>'
-        '<span class="kpi-trend {aoscls}">{aosarr} {aosd:+.2f}kW</span>'
-        '</div>'
-        '<div class="kpi-tile">'
-        '<span class="kpi-label">GM % &mdash; {lat}</span>'
-        '<span class="kpi-val" style="color:{gmcol}">{gm:.1f}%</span>'
-        '<span class="kpi-sub">Prev: {pgm:.1f}%</span>'
-        '<span class="kpi-trend {gmcls}">{gmarr} {gmd:+.2f}pp</span>'
-        '</div>'
-        '<div class="kpi-tile">'
-        '<span class="kpi-label">Adj GM % &mdash; {lat}</span>'
-        '<span class="kpi-val" style="color:{gmcol}">{adjgm:.1f}%</span>'
-        '<span class="kpi-sub">Prev: {padjgm:.1f}%</span>'
-        '<span class="kpi-trend {gmcls}">{gmarr} {adjgmd:+.2f}pp</span>'
-        '</div>'
+        '{orders}{kw}{rwp}{aos}{gm}{adjgm}'
         '</div>'
     ).format(
         lat=lat_lbl, prv=prv_lbl,
-        n=lat['n'], pn=prv['n'], mtdn=mtd['n'],
-        kw=lat['kw'], pkw=prv['kw'], mtkw=mtd['kw'],
-        rwp=lat['rev_wp'], prwp=prv['rev_wp'],
-        rwpd=lat['rev_wp']-prv['rev_wp'],
-        rwpcls='up' if lat['rev_wp']<prv['rev_wp'] else ('dn' if lat['rev_wp']>prv['rev_wp'] else 'neu'),
-        rwparr='&#9660;' if lat['rev_wp']<prv['rev_wp'] else '&#9650;',
-        aos=lat['aos'], paos=prv['aos'],
-        aosd=lat['aos']-prv['aos'],
-        aoscls='dn' if lat['aos']>=prv['aos'] else 'neu',
-        aosarr='&#9650;' if lat['aos']>=prv['aos'] else '&#9660;',
-        gm=lat['gm'], pgm=prv['gm'], gmd=lat['gm']-prv['gm'],
-        adjgm=lat['adj_gm'], padjgm=prv['adj_gm'], adjgmd=lat['adj_gm']-prv['adj_gm'],
-        gmcol=gmc(lat['gm']),
-        gmcls='dn' if lat['gm']>=prv['gm'] else 'up',
-        gmarr='&#9650;' if lat['gm']>=prv['gm'] else '&#9660;',
+        orders=_day_tile(
+            'Orders &mdash; {}'.format(lat_lbl),
+            str(lat['n']), '#0F172A',
+            'Prev ({}): {} &nbsp; MTD: {:,}'.format(prv_lbl, prv['n'], mtd['n']),
+            '{} {} vs prev'.format('&#9650;' if lat['n']>=prv['n'] else '&#9660;', dpct(lat['n'],prv['n']) if prv['n'] else ''),
+            '#059669' if lat['n']>=prv['n'] else '#DC2626'),
+        kw=_day_tile(
+            'kW &mdash; {}'.format(lat_lbl),
+            '{:.1f}'.format(lat['kw']), '#0F172A',
+            'Prev: {:.1f} kW &nbsp; MTD: {:,.0f}'.format(prv['kw'], mtd['kw']),
+            '{} {:+.1f} kW'.format('&#9650;' if lat['kw']>=prv['kw'] else '&#9660;', lat['kw']-prv['kw']),
+            '#059669' if lat['kw']>=prv['kw'] else '#DC2626'),
+        rwp=_day_tile(
+            'Rev/Wp &mdash; {}'.format(lat_lbl),
+            '&#8377;{:.2f}'.format(lat['rev_wp']), '#0F172A',
+            'Prev ({}): &#8377;{:.2f}'.format(prv_lbl, prv['rev_wp']),
+            '{} {:+.3f} &#8377;/Wp'.format('&#9650;' if _rwp_d_day>=0 else '&#9660;', _rwp_d_day),
+            '#DC2626' if _rwp_d_day < -0.5 else ('#059669' if _rwp_d_day > 0 else '#94A3B8')),
+        aos=_day_tile(
+            'AoS &mdash; {}'.format(lat_lbl),
+            '{:.2f} kW'.format(lat['aos']), '#0F172A',
+            'Prev: {:.2f} kW'.format(prv['aos']),
+            '{} {:+.2f}kW'.format('&#9650;' if _aos_d_day>=0 else '&#9660;', _aos_d_day),
+            '#059669' if _aos_d_day >= 0 else '#94A3B8'),
+        gm=_day_tile(
+            'GM % &mdash; {}'.format(lat_lbl),
+            '{:.1f}%'.format(lat['gm']), gmc(lat['gm']),
+            'Prev: {:.1f}%'.format(prv['gm']),
+            '{} {:+.2f}pp'.format('&#9650;' if _gm_d_day>=0 else '&#9660;', _gm_d_day),
+            '#059669' if _gm_d_day >= 0 else '#DC2626'),
+        adjgm=_day_tile(
+            'Adj GM % &mdash; {}'.format(lat_lbl),
+            '{:.1f}%'.format(lat['adj_gm']), gmc(lat['adj_gm']),
+            'Prev: {:.1f}%'.format(prv['adj_gm']),
+            '{} {:+.2f}pp'.format('&#9650;' if lat['adj_gm']>=prv['adj_gm'] else '&#9660;', lat['adj_gm']-prv['adj_gm']),
+            '#059669' if lat['adj_gm'] >= prv['adj_gm'] else '#DC2626'),
     )
 
 
