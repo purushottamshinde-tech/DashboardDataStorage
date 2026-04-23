@@ -629,14 +629,28 @@ body{
 .bridge-label{font-size:8.5px;color:var(--mid);display:block;margin-bottom:2px;font-family:'DM Sans',sans-serif;white-space:nowrap}
 .bridge-val{font-size:13px;font-weight:700;display:block}
 
+/* ── EXECUTIVE SUMMARY ── */
+.exec-summary{
+  background:#F0F6FF;border:1px solid #BFDBFE;border-radius:10px;
+  padding:14px 18px;margin-bottom:20px;
+  font-size:12px;color:#1E3A8A;line-height:1.7;
+}
+
+/* ── KPI SECTION LABEL ── */
+.kpi-section-label{
+  font-size:8.5px;font-weight:800;letter-spacing:2px;text-transform:uppercase;
+  color:#64748B;margin-bottom:14px;border-left:3px solid #93C5FD;padding-left:8px;
+}
+
 /* ── KPI TILE GRID — 4-col desktop / 2-col mobile ── */
 .kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
 .kpi-tile{
   border-radius:12px;padding:16px 18px;
-  border:1px solid var(--border);background:#fff;
+  border:1px solid #E2E8F0;background:#fff;
   display:flex;flex-direction:column;gap:4px;
+  box-shadow:0 1px 4px rgba(0,0,0,.04);
 }
-.kpi-label{font-size:8px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:#94A3B8}
+.kpi-label{font-size:8px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:#64748B;background:#F1F5F9;border-radius:4px;padding:2px 6px;margin-bottom:4px;display:inline-block;align-self:flex-start}
 .kpi-val{font-size:26px;font-weight:900;letter-spacing:-.6px;line-height:1.1;color:#0F172A}
 .kpi-sub{font-size:10.5px;color:#64748B;line-height:1.4}
 .kpi-trend{font-size:10.5px;font-weight:700;margin-top:2px}
@@ -807,29 +821,30 @@ def build(data):
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     #  DYNAMIC HEADLINE
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    HERO_GRAD = 'linear-gradient(135deg,#1565C0 0%,#1976D2 50%,#42A5F5 100%)'
     if len(price_dn) >= 4:
         headline = 'Revenue realisation drop across {} clusters &#8212; discount approvals need immediate review'.format(len(price_dn))
-        hero_grad = 'linear-gradient(135deg,#0369A1 0%,#0284C7 50%,#0EA5E9 100%)'
+        hero_grad = HERO_GRAD
     elif len(price_dn) >= 2:
         names_short = ', '.join(c for c,_ in price_dn[:3])
         headline = 'Revenue realisation falling in {} markets ({}) &#8212; GM holding but revenue realisation needs attention'.format(len(price_dn), names_short)
-        hero_grad = 'linear-gradient(135deg,#0369A1 0%,#0284C7 50%,#0EA5E9 100%)'
+        hero_grad = HERO_GRAD
     elif len(price_dn) == 1:
         headline = 'Revenue realisation dip in {} &#8212; overall business metrics on track'.format(price_dn[0][0])
-        hero_grad = 'linear-gradient(135deg,#0369A1 0%,#0284C7 50%,#0EA5E9 100%)'
+        hero_grad = HERO_GRAD
     elif gm_trend >= 0.5:
         headline = 'GM expanding {:.1f}ppt MoM &#8212; revenue discipline and volume growth aligned'.format(gm_trend)
-        hero_grad = 'linear-gradient(135deg,#0369A1 0%,#0284C7 50%,#0EA5E9 100%)'
+        hero_grad = HERO_GRAD
     elif gm_trend <= -0.5:
         headline = 'GM contracting {:.1f}ppt MoM &#8212; root cause: {}'.format(
             abs(gm_trend), 'COGS mix shift' if cogs_net_gm < -0.3 else 'revenue pressure')
-        hero_grad = 'linear-gradient(135deg,#0369A1 0%,#0284C7 50%,#0EA5E9 100%)'
+        hero_grad = HERO_GRAD
     elif vol_pct >= 15:
         headline = 'Volume surge +{:.0f}% MoM &#8212; GM stable at {:.2f}% despite scale-up'.format(vol_pct, mtd['gm'])
-        hero_grad = 'linear-gradient(135deg,#0369A1 0%,#0284C7 50%,#0EA5E9 100%)'
+        hero_grad = HERO_GRAD
     else:
         headline = 'Operations on track &#8212; {:,} installations at {:.2f}% GM through {}'.format(mtd['n'], mtd['gm'], lat_lbl)
-        hero_grad = 'linear-gradient(135deg,#0369A1 0%,#0284C7 50%,#0EA5E9 100%)'
+        hero_grad = HERO_GRAD
 
     # ── GM Badge
     gm_arrow = '&#9650;' if gm_trend>=0 else '&#9660;'
@@ -904,43 +919,182 @@ def build(data):
     _cab_gm_impact  = -(cab_wp_d / pm['rev_wp'] * 100) if pm['rev_wp'] else 0
     _inv_gm_impact  = -(inv_wp_d / pm['rev_wp'] * 100) if pm['rev_wp'] else 0
     _mod_oth_impact = gm_trend - _rev_gm_impact - _mms_gm_impact - _cab_gm_impact - _inv_gm_impact
-    def _bridge_item(label, impact):
-        cls = 'bridge-item pos' if impact > 0 else 'bridge-item'
-        clr = 'var(--green)' if impact > 0 else 'var(--red)'
-        sign = '+' if impact >= 0 else ''
-        return ('<div class="{}">'
-                '<span class="bridge-label">{}</span>'
-                '<span class="bridge-val" style="color:{}">{}{:.2f}pp</span>'
-                '</div>').format(cls, label, clr, sign, impact)
-    bridge_items = []
+    # ── GM Bridge waterfall chart (SVG-based, like Image 4)
+    _bridge_data = []
     if abs(_rev_gm_impact) > 0.01:
-        bridge_items.append(_bridge_item(
-            'Rev/Wp {}{:.2f}/Wp'.format('+' if rev_wp_d_ref>=0 else '',rev_wp_d_ref),
-            _rev_gm_impact))
+        _bridge_data.append(('Price', _rev_gm_impact, 'Rev/Wp {:+.2f}/Wp'.format(rev_wp_d_ref)))
     if abs(_mms_gm_impact) > 0.01:
-        bridge_items.append(_bridge_item('MMS {}{:.2f}/Wp'.format('+' if mms_wp_d>=0 else '',mms_wp_d), _mms_gm_impact))
+        _bridge_data.append(('MMS', _mms_gm_impact, 'MMS {:+.3f}/Wp'.format(mms_wp_d)))
     if abs(_cab_gm_impact) > 0.01:
-        bridge_items.append(_bridge_item('Cables {}{:.2f}/Wp'.format('+' if cab_wp_d>=0 else '',cab_wp_d), _cab_gm_impact))
+        _bridge_data.append(('Cables', _cab_gm_impact, 'Cables {:+.3f}/Wp'.format(cab_wp_d)))
     if abs(_inv_gm_impact) > 0.01:
-        bridge_items.append(_bridge_item('Inverter {}{:.2f}/Wp'.format('+' if inv_wp_d>=0 else '',inv_wp_d), _inv_gm_impact))
+        _bridge_data.append(('Inverter', _inv_gm_impact, 'Inverter {:+.3f}/Wp'.format(inv_wp_d)))
     if abs(_mod_oth_impact) > 0.01:
-        bridge_items.append(_bridge_item('Module/Other', _mod_oth_impact))
+        _bridge_data.append(('Prod Mix', _mod_oth_impact, 'Module/Other'))
+
+    def _build_bridge_chart(start_val, end_val, items, start_lbl, end_lbl):
+        """Build an SVG waterfall chart for the GM bridge."""
+        # Chart dimensions
+        W = 680; H = 220
+        PAD_L = 44; PAD_R = 20; PAD_T = 24; PAD_B = 48
+        chart_w = W - PAD_L - PAD_R
+        chart_h = H - PAD_T - PAD_B
+
+        # All bars: start, each bridge item, end
+        all_bars = [('start', start_val, start_lbl)] + \
+                   [(d[0], d[1], d[2]) for d in items] + \
+                   [('end', end_val, end_lbl)]
+        n_bars = len(all_bars)
+        bar_w = min(60, (chart_w - (n_bars - 1) * 10) // n_bars)
+        gap = (chart_w - bar_w * n_bars) // max(n_bars - 1, 1)
+
+        # Y axis: cover start_val, end_val, and all running totals
+        running = start_val
+        all_vals = [start_val, end_val]
+        for _, impact, _ in items:
+            all_vals.extend([running, running + impact])
+            running += impact
+        y_min = min(all_vals) - 0.5
+        y_max = max(all_vals) + 0.5
+        y_range = y_max - y_min
+
+        def y_px(val):
+            return PAD_T + chart_h * (1 - (val - y_min) / y_range)
+
+        def pct_str(v):
+            return '{:.1f}%'.format(v)
+
+        # Y-axis gridlines
+        import math
+        tick_step = 0.5 if y_range < 4 else 1.0
+        tick_vals = []
+        t = math.ceil(y_min / tick_step) * tick_step
+        while t <= y_max + 0.01:
+            tick_vals.append(round(t, 2))
+            t = round(t + tick_step, 2)
+
+        svg_parts = [
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" '
+            'style="width:100%;max-width:{W}px;height:auto;font-family:\'DM Sans\',sans-serif">'.format(W=W, H=H)
+        ]
+
+        # Background
+        svg_parts.append('<rect width="{}" height="{}" fill="#FAFCFF" rx="10"/>'.format(W, H))
+
+        # Title
+        svg_parts.append(
+            '<text x="{}" y="16" font-size="10" font-weight="700" fill="#1E293B" '
+            'letter-spacing="1" text-anchor="start">GM% BRIDGE &mdash; {} &#8594; {}</text>'.format(
+                PAD_L, start_lbl, end_lbl))
+
+        # Gridlines + Y labels
+        for tv in tick_vals:
+            yp = y_px(tv)
+            svg_parts.append(
+                '<line x1="{}" x2="{}" y1="{:.1f}" y2="{:.1f}" '
+                'stroke="#E2E8F0" stroke-width="1"/>'.format(PAD_L, W - PAD_R, yp, yp))
+            svg_parts.append(
+                '<text x="{}" y="{:.1f}" font-size="9" fill="#94A3B8" text-anchor="end" '
+                'dominant-baseline="middle">{:.0f}%</text>'.format(PAD_L - 4, yp, tv))
+
+        # Zero / reference line
+        if y_min < start_val < y_max:
+            yp0 = y_px(start_val)
+            svg_parts.append(
+                '<line x1="{}" x2="{}" y1="{:.1f}" y2="{:.1f}" '
+                'stroke="#94A3B8" stroke-width="1" stroke-dasharray="4,3"/>'.format(
+                    PAD_L, W - PAD_R, yp0, yp0))
+
+        # Draw bars
+        running = start_val
+        for i, (key, val, lbl) in enumerate(all_bars):
+            x = PAD_L + i * (bar_w + gap)
+            cx = x + bar_w / 2
+
+            if key == 'start':
+                bar_top = y_px(val); bar_bot = y_px(0) if y_min < 0 else y_px(y_min)
+                bar_top2 = y_px(val); bar_bot2 = H - PAD_B
+                bar_h = bar_bot2 - bar_top
+                color = '#E07B39'
+                svg_parts.append(
+                    '<rect x="{:.1f}" y="{:.1f}" width="{}" height="{:.1f}" '
+                    'fill="{}" rx="3"/>'.format(x, bar_top, bar_w, max(bar_h, 2), color))
+                svg_parts.append(
+                    '<text x="{:.1f}" y="{:.1f}" font-size="11" font-weight="700" '
+                    'fill="{}" text-anchor="middle">{}</text>'.format(
+                        cx, bar_top - 6, color, pct_str(val)))
+            elif key == 'end':
+                bar_top = y_px(val); bar_bot2 = H - PAD_B
+                bar_h = bar_bot2 - bar_top
+                color = '#E07B39'
+                svg_parts.append(
+                    '<rect x="{:.1f}" y="{:.1f}" width="{}" height="{:.1f}" '
+                    'fill="{}" rx="3"/>'.format(x, bar_top, bar_w, max(bar_h, 2), color))
+                svg_parts.append(
+                    '<text x="{:.1f}" y="{:.1f}" font-size="11" font-weight="700" '
+                    'fill="{}" text-anchor="middle">{}</text>'.format(
+                        cx, bar_top - 6, color, pct_str(val)))
+            else:
+                # Floating bar
+                base = running
+                top_val = base + val if val > 0 else base
+                bot_val = base if val > 0 else base + val
+                bar_top = y_px(top_val)
+                bar_bot = y_px(bot_val)
+                bar_h = max(abs(bar_bot - bar_top), 3)
+                color = '#22C55E' if val > 0 else '#EF4444'
+                svg_parts.append(
+                    '<rect x="{:.1f}" y="{:.1f}" width="{}" height="{:.1f}" '
+                    'fill="{}" rx="3" opacity="0.85"/>'.format(x, min(bar_top, bar_bot), bar_w, bar_h, color))
+                sign = '+' if val >= 0 else ''
+                svg_parts.append(
+                    '<text x="{:.1f}" y="{:.1f}" font-size="10" font-weight="700" '
+                    'fill="{}" text-anchor="middle">{}{:.2f}%</text>'.format(
+                        cx, min(bar_top, bar_bot) - 5, color, sign, val))
+                # connector line to next bar
+                if i < n_bars - 2:
+                    conn_y = y_px(running + val)
+                    next_x = x + bar_w + gap
+                    svg_parts.append(
+                        '<line x1="{:.1f}" x2="{:.1f}" y1="{:.1f}" y2="{:.1f}" '
+                        'stroke="#CBD5E1" stroke-width="1" stroke-dasharray="3,2"/>'.format(
+                            x + bar_w, next_x, conn_y, conn_y))
+                running += val
+
+            # X-axis label
+            svg_parts.append(
+                '<text x="{:.1f}" y="{}" font-size="10" fill="#374151" text-anchor="middle" '
+                'font-weight="{}">{}</text>'.format(
+                    cx, H - PAD_B + 14, '700' if key in ('start', 'end') else '500', key))
+
+        # Footer detail
+        detail_parts = []
+        for d in items:
+            if abs(d[1]) > 0.01:
+                detail_parts.append('{}: {:+.2f}%'.format(d[0], d[1]))
+        if detail_parts:
+            svg_parts.append(
+                '<text x="{}" y="{}" font-size="8.5" fill="#94A3B8" text-anchor="start">{}</text>'.format(
+                    PAD_L, H - 6, ' · '.join(detail_parts)))
+
+        svg_parts.append('</svg>')
+        return ''.join(svg_parts)
+
+    bridge_chart_svg = _build_bridge_chart(
+        pm['gm'], mtd['gm'], _bridge_data,
+        '{} 26'.format(prev_lbl), '{} 26'.format(curr_lbl[:3]))
+
     bridge_html = (
-        '<div style="margin-top:18px">'
-        '<div class="sec-title" style="margin-bottom:10px;margin-top:20px">GM Bridge &#8212; {} MTD vs {} {}</div>'
-        '<div class="bridge-scroll"><div class="bridge">'
-        '<div class="bridge-box start"><span class="bridge-label">{} GM</span>'
-        '<span class="bridge-val">{:.2f}%</span></div>'
+        '<div style="margin-top:20px">'
+        '<div class="kpi-section-label" style="margin-bottom:12px">GM% BRIDGE &mdash; {} MTD vs {} {}</div>'
+        '<div style="border:1px solid #E2E8F0;border-radius:12px;overflow:hidden;background:#FAFCFF;padding:12px 8px 4px">'
         '{}'
-        '<div class="bridge-box end"><span class="bridge-label">{} GM</span>'
-        '<span class="bridge-val">{:.2f}%</span></div>'
-        '</div></div>'
-        '<div style="font-size:10px;color:#9CA3AF;margin-top:4px">'
-        '* Bridge partials rounded to 2dp; residual in Module/Other. '
+        '</div>'
+        '<div style="font-size:9.5px;color:#9CA3AF;margin-top:6px">'
+        '* Bridge partials rounded to 2dp; residual in Prod Mix. '
         'Rev/Wp impact = &#916;&#8377;/Wp &#247; Rev/Wp_PM &#215; GM_PM</div>'
         '</div>'
-    ).format(curr_lbl, prev_lbl, latest.year, prev_lbl, pm['gm'],
-             ''.join(bridge_items), curr_lbl[:3], mtd['gm'])
+    ).format(curr_lbl, prev_lbl, latest.year, bridge_chart_svg)
 
     # snap4_html removed — Exec Snapshot section dropped
 
@@ -1026,12 +1180,37 @@ def build(data):
         'vs {} {}'.format(fc(pm['abs_gm']), prev_lbl),
         trend_txt='{} {:+.0f}%'.format(_agm_arr, _agm_d_pct), trend_cls=_agm_cls)
 
+    # ── Executive Summary banner (like Image 2)
+    gm_dir_word = 'up' if gm_trend >= 0 else 'down'
+    # Build attention clusters string
+    attn_clusters = []
+    for r in declining[:3]:
+        attn_clusters.append('{} ({:.1f}%)'.format(r['cluster'], r['curr']['gm']))
+    attn_str = (', '.join(attn_clusters) + ' need margin attention') if attn_clusters else 'all clusters on target'
+    exec_summary_html = (
+        '<div class="exec-summary">'
+        '<b>{:,} installations</b> ({:,.0f} kW) completed MTD in {} &mdash; '
+        '<span style="color:#16A34A">&#9650;{:.0f}%</span> vs {} on volume. '
+        'Overall GM is <b style="color:{}">{:.2f}%</b> ({} {:.2f}pp MoM). '
+        'Rev/Wp at &#8377;{:.2f} vs &#8377;{:.2f} in {}. {}.'
+        '</div>'
+    ).format(
+        mtd['n'], mtd['kw'], curr_lbl,
+        abs(vol_pct), prev_lbl,
+        gmc(mtd['gm']), mtd['gm'],
+        gm_dir_word, abs(gm_trend),
+        mtd['rev_wp'], pm['rev_wp'], prev_lbl,
+        attn_str
+    )
+
     kpi_html = (
+        exec_summary_html +
+        '<div class="kpi-section-label">MTD AT A GLANCE &mdash; {curr} VS {prev} (SAME {days} DAYS)</div>'
         '<div class="kpi-grid">'
         + t_vol + t_kw + t_gm + t_rev
         + t_aos + t_aov + t_rwp + t_agm
         + '</div>'
-    )
+    ).format(curr=curr_lbl.upper(), prev=prev_lbl.upper(), days=pm_day)
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     #  TODAY VS YESTERDAY
@@ -1046,18 +1225,61 @@ def build(data):
         ).format(label, vc, today_val, prev_val, delta_html)
 
     today_html = (
-        '<table class="today-grid"><tr>'
-        + tcard('Installations', str(lat['n']), str(prv['n']),
-                dpct(lat['n'], prv['n']) if prv['n'] else '')
-        + tcard('kW Installed', '{:.1f} kW'.format(lat['kw']), '{:.1f} kW'.format(prv['kw']),
-                dpval(lat['kw']-prv['kw'], 'kW') if prv['kw'] else '')
-        + tcard('Rev / Wp', '&#8377;{:.2f}'.format(lat['rev_wp']), '&#8377;{:.2f}'.format(prv['rev_wp']),
-                dpval(lat['rev_wp']-prv['rev_wp'], '&#8377;/Wp') if prv['rev_wp'] else '')
-        + tcard('Avg System Size', '{:.2f} kW'.format(lat['aos']), '{:.2f} kW'.format(prv['aos']),
-                dpval(lat['aos']-prv['aos'], 'kW') if prv['aos'] else '')
-        + tcard('GM %', '{:.1f}%'.format(lat['gm']), '{:.1f}%'.format(prv['gm']),
-                dpp(lat['gm']-prv['gm']) if prv['gm'] else '', vc=gmc(lat['gm']))
-        + '</tr></table>'
+        '<div class="kpi-section-label" style="margin-bottom:12px">LATEST DAY &mdash; {lat} VS {prv} &nbsp; <span style="font-size:9px;color:#9CA3AF;font-weight:400">Data updated through {lat} &nbsp; Showing {lat} vs {prv}</span></div>'
+        '<div class="kpi-grid">'
+        '<div class="kpi-tile">'
+        '<span class="kpi-label">Orders &mdash; {lat}</span>'
+        '<span class="kpi-val" style="color:#0F172A">{n}</span>'
+        '<span class="kpi-sub">Prev ({prv}): {pn} &nbsp;&nbsp; MTD: {mtdn:,}</span>'
+        '</div>'
+        '<div class="kpi-tile">'
+        '<span class="kpi-label">kW &mdash; {lat}</span>'
+        '<span class="kpi-val" style="color:#0F172A">{kw:.1f}</span>'
+        '<span class="kpi-sub">Prev: {pkw:.1f} kW &nbsp;&nbsp; MTD: {mtkw:,.0f}</span>'
+        '<span class="kpi-trend {rwpcls}">{rwparr} {rwpd:.3f} &#8377;/Wp</span>'
+        '</div>'
+        '<div class="kpi-tile">'
+        '<span class="kpi-label">Rev/Wp &mdash; {lat}</span>'
+        '<span class="kpi-val" style="color:#0F172A">&#8377;{rwp:.2f}</span>'
+        '<span class="kpi-sub">Prev ({prv}): &#8377;{prwp:.2f}</span>'
+        '<span class="kpi-trend {rwpcls}">{rwparr} {rwpd:.3f} &#8377;/Wp</span>'
+        '</div>'
+        '<div class="kpi-tile">'
+        '<span class="kpi-label">AoS &mdash; {lat}</span>'
+        '<span class="kpi-val" style="color:#0F172A">{aos:.2f} kW</span>'
+        '<span class="kpi-sub">Prev: {paos:.2f} kW</span>'
+        '<span class="kpi-trend {aoscls}">{aosarr} {aosd:+.2f}kW</span>'
+        '</div>'
+        '<div class="kpi-tile">'
+        '<span class="kpi-label">GM % &mdash; {lat}</span>'
+        '<span class="kpi-val" style="color:{gmcol}">{gm:.1f}%</span>'
+        '<span class="kpi-sub">Prev: {pgm:.1f}%</span>'
+        '<span class="kpi-trend {gmcls}">{gmarr} {gmd:+.2f}pp</span>'
+        '</div>'
+        '<div class="kpi-tile">'
+        '<span class="kpi-label">Adj GM % &mdash; {lat}</span>'
+        '<span class="kpi-val" style="color:{gmcol}">{adjgm:.1f}%</span>'
+        '<span class="kpi-sub">Prev: {padjgm:.1f}%</span>'
+        '<span class="kpi-trend {gmcls}">{gmarr} {adjgmd:+.2f}pp</span>'
+        '</div>'
+        '</div>'
+    ).format(
+        lat=lat_lbl, prv=prv_lbl,
+        n=lat['n'], pn=prv['n'], mtdn=mtd['n'],
+        kw=lat['kw'], pkw=prv['kw'], mtkw=mtd['kw'],
+        rwp=lat['rev_wp'], prwp=prv['rev_wp'],
+        rwpd=lat['rev_wp']-prv['rev_wp'],
+        rwpcls='up' if lat['rev_wp']<prv['rev_wp'] else ('dn' if lat['rev_wp']>prv['rev_wp'] else 'neu'),
+        rwparr='&#9660;' if lat['rev_wp']<prv['rev_wp'] else '&#9650;',
+        aos=lat['aos'], paos=prv['aos'],
+        aosd=lat['aos']-prv['aos'],
+        aoscls='dn' if lat['aos']>=prv['aos'] else 'neu',
+        aosarr='&#9650;' if lat['aos']>=prv['aos'] else '&#9660;',
+        gm=lat['gm'], pgm=prv['gm'], gmd=lat['gm']-prv['gm'],
+        adjgm=lat['adj_gm'], padjgm=prv['adj_gm'], adjgmd=lat['adj_gm']-prv['adj_gm'],
+        gmcol=gmc(lat['gm']),
+        gmcls='dn' if lat['gm']>=prv['gm'] else 'up',
+        gmarr='&#9650;' if lat['gm']>=prv['gm'] else '&#9660;',
     )
 
 
@@ -1361,7 +1583,7 @@ def build(data):
 <style>''' + CSS + '''</style></head><body><div class="page">''' + ''.join([
 
         # ── HEADER
-        '<div class="header" style="background:linear-gradient(135deg,#0F172A 0%,#1E293B 60%,#0F2744 100%)">',
+        '<div class="header" style="background:linear-gradient(135deg,#1565C0 0%,#1976D2 50%,#42A5F5 100%)">',
         '<div class="eyebrow">&#9728;&#65039; Solar Square &nbsp;&middot;&nbsp; B2C GM Report &nbsp;&middot;&nbsp; Analytics</div>',
         '<h1>', headline, '</h1>',
         '<div class="header-meta">Data through ', latest.strftime('%d %b %Y'),
