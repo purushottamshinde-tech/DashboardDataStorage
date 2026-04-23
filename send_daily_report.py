@@ -932,29 +932,9 @@ def build(data):
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     #  DYNAMIC HEADLINE
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    if len(price_dn) >= 4:
-        headline = 'Revenue realisation drop across {} clusters &#8212; discount approvals need immediate review'.format(len(price_dn))
-        hero_grad = 'linear-gradient(135deg,#0369A1 0%,#0284C7 50%,#0EA5E9 100%)'
-    elif len(price_dn) >= 2:
-        names_short = ', '.join(c for c,_ in price_dn[:3])
-        headline = 'Revenue realisation falling in {} markets ({}) &#8212; GM holding but revenue realisation needs attention'.format(len(price_dn), names_short)
-        hero_grad = 'linear-gradient(135deg,#0369A1 0%,#0284C7 50%,#0EA5E9 100%)'
-    elif len(price_dn) == 1:
-        headline = 'Revenue realisation dip in {} &#8212; overall business metrics on track'.format(price_dn[0][0])
-        hero_grad = 'linear-gradient(135deg,#0369A1 0%,#0284C7 50%,#0EA5E9 100%)'
-    elif gm_trend >= 0.5:
-        headline = 'GM expanding {:.1f}ppt MoM &#8212; revenue discipline and volume growth aligned'.format(gm_trend)
-        hero_grad = 'linear-gradient(135deg,#0369A1 0%,#0284C7 50%,#0EA5E9 100%)'
-    elif gm_trend <= -0.5:
-        headline = 'GM contracting {:.1f}ppt MoM &#8212; root cause: {}'.format(
-            abs(gm_trend), 'COGS mix shift' if cogs_net_gm < -0.3 else 'revenue pressure')
-        hero_grad = 'linear-gradient(135deg,#0369A1 0%,#0284C7 50%,#0EA5E9 100%)'
-    elif vol_pct >= 15:
-        headline = 'Volume surge +{:.0f}% MoM &#8212; GM stable at {:.2f}% despite scale-up'.format(vol_pct, mtd['gm'])
-        hero_grad = 'linear-gradient(135deg,#0369A1 0%,#0284C7 50%,#0EA5E9 100%)'
-    else:
-        headline = 'Operations on track &#8212; {:,} installations at {:.2f}% GM through {}'.format(mtd['n'], mtd['gm'], lat_lbl)
-        hero_grad = 'linear-gradient(135deg,#0369A1 0%,#0284C7 50%,#0EA5E9 100%)'
+    # Fixed headline — date-stamped dashboard title
+    headline = 'Solar Square Daily GM Report Dashboard'
+    hero_grad = 'linear-gradient(135deg,#0284C7 0%,#0EA5E9 55%,#38BDF8 100%)'
 
     # ── GM Badge
     gm_arrow = '&#9650;' if gm_trend>=0 else '&#9660;'
@@ -1515,6 +1495,111 @@ def build(data):
         '<table class="data-table">{}<tbody>{}</tbody></table></div>'
     ).format(cl_thead, cl_tbody)
 
+    # ── CLUSTER INSIGHTS: short factual bullets per cluster (no actionables)
+    def _ci_sign(v): return '+' if v >= 0 else ''
+    def _ci_arrow(v): return '&#9650;' if v >= 0 else '&#9660;'
+    def _ci_clr(v, good_positive=True):
+        if good_positive:
+            return '#059669' if v >= 0 else '#DC2626'
+        return '#DC2626' if v >= 0 else '#059669'
+
+    ci_rows = []
+    # Build for all clusters with enough volume
+    for r in (declining + improving + stable_cl)[:20]:
+        c = r['curr']; p = r['prev']
+        if c['n'] < MIN_ORDERS: continue
+        det = r['drv_det']
+        rv_d  = det.get('rev_wp_d', 0)
+        ck_d  = det.get('cogs_kw_d', 0) / 1000
+        ao_d  = c['aos'] - p['aos'] if p['n'] else 0
+        gm_d  = r['gm_d']
+
+        # Build 1-2 line insight
+        parts = []
+
+        # Revenue realisation
+        if abs(rv_d) > 0.3:
+            clr = _ci_clr(rv_d, good_positive=True)
+            parts.append(
+                'Rev/Wp <span style="color:{};font-weight:700">{}{:+.2f}/Wp</span>'
+                ' ({:.2f} vs {:.2f} {})'.format(
+                    clr, _ci_arrow(rv_d), rv_d,
+                    c['rev_wp'], p['rev_wp'] if p['n'] else 0, prev_lbl)
+            )
+
+        # COGS
+        if abs(ck_d) > 0.02:
+            clr = _ci_clr(ck_d, good_positive=False)
+            parts.append(
+                'COGS <span style="color:{};font-weight:700">{}{:+.3f}/Wp</span>'.format(
+                    clr, _ci_arrow(ck_d), ck_d)
+                + (' &#8212; AoS {:+.2f}kW'.format(ao_d) if abs(ao_d) > 0.1 else '')
+            )
+
+        # Product mix note (GM vs blended)
+        if abs(c['gm'] - mtd['gm']) > 1.5:
+            if c['gm'] > mtd['gm']:
+                parts.append(
+                    'GM <span style="color:#059669;font-weight:700">{:.1f}%</span>'
+                    ' &#8212; {:.1f}pp above blended avg'.format(c['gm'], c['gm'] - mtd['gm'])
+                )
+            else:
+                parts.append(
+                    'GM <span style="color:#DC2626;font-weight:700">{:.1f}%</span>'
+                    ' &#8212; {:.1f}pp below blended avg'.format(c['gm'], mtd['gm'] - c['gm'])
+                )
+
+        if not parts:
+            parts.append('Stable &#8212; Rev/Wp &amp; COGS within normal band')
+
+        # GM delta badge
+        gm_bg  = '#DCFCE7' if gm_d >= 0 else '#FEE2E2'
+        gm_clr = '#166534' if gm_d >= 0 else '#B91C1C'
+        gm_badge = (
+            '<span style="display:inline-block;background:{};color:{};'
+            'font-size:9px;font-weight:700;padding:2px 7px;border-radius:5px;'
+            'white-space:nowrap">'
+            '{}{:+.2f}pp</span>'.format(gm_bg, gm_clr, _ci_arrow(gm_d), gm_d)
+        )
+
+        ci_rows.append((r['cluster'], c['n'], gm_badge, parts))
+
+    # Render as a clean 2-column card grid
+    ci_cards = ''
+    for i, (cluster, n, gm_badge, parts) in enumerate(ci_rows):
+        ci_cards += (
+            '<div style="'
+            'background:#F8FAFC;border:1px solid #DBEAFE;border-left:4px solid #0284C7;'
+            'border-radius:9px;padding:12px 14px;'
+            '">'
+            '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px">'
+            '<span style="font-weight:800;font-size:13px;color:#0F172A">{}</span>'
+            '<div style="display:flex;align-items:center;gap:6px">'
+            '<span style="font-size:10px;color:#94A3B8">{:,} installs</span>'
+            '{}'
+            '</div>'
+            '</div>'
+            '<div style="font-size:10.5px;color:#334155;line-height:1.8">'
+            '{}'
+            '</div>'
+            '</div>'
+        ).format(cluster, n, gm_badge, ' &nbsp;&#183;&nbsp; '.join(parts))
+
+    if ci_cards:
+        cluster_insights_html = (
+            '<div style="'
+            'display:grid;grid-template-columns:1fr 1fr;gap:10px;'
+            '">'
+            '{}'
+            '</div>'
+            '<p style="font-size:9.5px;color:#94A3B8;margin-top:8px;font-style:italic">'
+            '* Insights based on Rev/Wp, COGS/Wp, and GM% vs full {}. '
+            'Clusters with &lt;{} installs MTD excluded.'
+            '</p>'
+        ).format(ci_cards, prev_lbl, MIN_ORDERS)
+    else:
+        cluster_insights_html = '<p style="color:#94A3B8;font-size:11px">No cluster data available.</p>'
+
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     #  STRATEGIC ACTIONS
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1783,6 +1868,32 @@ def build(data):
         '</div>'
     ).format(cogs_diff_val)
 
+
+    # ── Run-rate bar (sky-blue inline banner)
+    if latest.day > 1:
+        _pace = mtd['n'] / latest.day
+        _proj = round(_pace * 30)
+        _abs_gm_proj = fc(mtd['abs_gm'] / latest.day * 30)
+        runrate_bar = (
+            '<div style="'
+            'background:#EFF6FF;'
+            'border-left:4px solid #0284C7;'
+            'border-bottom:1px solid #BFDBFE;'
+            'padding:10px 18px;'
+            'font-size:11.5px;'
+            'color:#0369A1;'
+            'line-height:1.6;'
+            'font-weight:600;'
+            '">'
+            '&#128200; <b>Month run-rate:</b> {:.1f} installations/day'
+            ' &rarr; <b>~{:,} projected for full month</b>'
+            ' (vs {:,} actual in {}). '
+            'At current GM {:.2f}%, implies <b>{}</b> gross margin for the month.'
+            '</div>'
+        ).format(_pace, _proj, pm['n'], prev_lbl, mtd['gm'], _abs_gm_proj)
+    else:
+        runrate_bar = ''
+
     html = '''<!DOCTYPE html><html lang="en"><head>''' + '''
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -1793,10 +1904,13 @@ def build(data):
         '<div class="header">',
         '<div class="eyebrow">&#9728; Solar Square &nbsp;&middot;&nbsp; Daily GM Report</div>',
         '<h1>', headline, '</h1>',
-        '<div class="header-meta">Data through ', latest.strftime('%d %b %Y'),
-        ' &nbsp;&middot;&nbsp; {} MTD vs full {} '.format(curr_lbl[:3], prev_lbl),
-        str(pm_last.year),
-        ' &nbsp;&middot;&nbsp; Generated ', now_str, '</div>',
+        '<div class="header-meta">',
+        'MOTO MONTH: {} &nbsp;&middot;&nbsp; DATA THROUGH {} &nbsp;&middot;&nbsp; {}'.format(
+            latest.strftime('%b-%y').upper(),
+            latest.strftime('%d %b %Y').upper(),
+            now_str
+        ),
+        '</div>',
         '<div class="badges">',
         '<span class="badge hi">&#10004; All numbers validated &amp; reconciled</span>',
         ' <span class="badge">{:,} installs MTD</span>'.format(mtd['n']),
@@ -1811,11 +1925,13 @@ def build(data):
 
         # ── SECTIONS
         # Exec Snapshot removed
+        runrate_bar,
         section('MTD Dashboard', '{} MTD vs full {}'.format(curr_lbl[:3], prev_lbl), kpi_html),
         section('Today at a Glance', '{} vs {}'.format(lat_lbl, prv_lbl), today_html),
         section('Product Mix', 'Offer-type split MTD vs full {}'.format(prev_lbl), mix_html),
         section('COGS Analysis', '{} MTD vs full {} &#8212; SKU-level root cause'.format(curr_lbl, prev_lbl), cogs_html),
         section('Cluster Health', 'Active clusters (n &#8805; {}) &#8212; GM%, Rev/Wp, &#916;pp'.format(MIN_ORDERS), cl_html),
+        section('Cluster Insights', 'What happened &#8212; Rev/Wp, COGS, GM vs blended avg', cluster_insights_html),
         # Top Things to Watch removed
         # Deep-Dive Insights removed
 
