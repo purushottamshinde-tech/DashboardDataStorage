@@ -135,6 +135,43 @@ def build_sku_html(sku_data, aos_d, prev_lbl, curr_lbl, main_kw_c=None, main_kw_
     sg8_c = a_inv.get('8 kw 3 Phase Inverter SG8RT (GSM)-SUNGROW',{}).get('rwp',0)
     sg8_p = p_inv.get('8 kw 3 Phase Inverter SG8RT (GSM)-SUNGROW',{}).get('rwp',0)
 
+    # ── Helper: generate SKU-level detail lines (rate / mix / delta) ──
+    def _sku_lines(a_curr, a_prev, top_n=5, min_rwp=0.002):
+        lines = []
+        sorted_skus = sorted(a_curr.items(), key=lambda x: -x[1]['cost'])[:top_n]
+        for name, cv in sorted_skus:
+            pv = a_prev.get(name, {'rwp': 0, 'mix': 0, 'cost': 0})
+            prv_rwp = pv.get('rwp', 0)
+            dr = cv['rwp'] - prv_rwp
+            mix = cv.get('mix', 0)
+            sn = name.replace('-', ' ').strip()
+            if len(sn) > 38: sn = sn[:36] + '..'
+            if prv_rwp < 0.001 and cv['rwp'] > 0.001:
+                lines.append(
+                    '&#128308; <b>{}</b> &mdash; <b>NEW SKU</b>, mix <b>{:.1f}%</b>, '
+                    '&#8377;{:.3f}/Wp &middot; '
+                    '<em style="color:#B91C1C">added this month</em>'.format(sn, mix, cv['rwp'])
+                )
+            elif abs(dr) >= min_rwp:
+                if dr > 0:
+                    icon = '&#128204;'
+                    tag = '<span style="color:#DC2626;font-weight:700">+&#8377;{:.3f}/Wp</span>'.format(dr)
+                    verdict = '<em style="color:#B91C1C">rate &#9650;</em>'
+                else:
+                    icon = '&#9989;'
+                    tag = '<span style="color:#059669;font-weight:700">{:+.3f} &#8377;/Wp</span>'.format(dr)
+                    verdict = '<em style="color:#059669">rate &#9660; (offsetting)</em>'
+                lines.append(
+                    '{} <b>{}</b> &mdash; mix <b>{:.1f}%</b>, &#8377;{:.3f}&#8594;&#8377;{:.3f}/Wp '
+                    '({}) &middot; {}'.format(icon, sn, mix, prv_rwp, cv['rwp'], tag, verdict)
+                )
+            else:
+                lines.append(
+                    '&#9989; <b>{}</b> &mdash; mix <b>{:.1f}%</b>, &#8377;{:.3f}/Wp '
+                    '(rate flat) &middot; <em style="color:#64748B">stable</em>'.format(sn, mix, cv['rwp'])
+                )
+        return lines
+
     def badge(txt, color):
         return '<span style="display:inline-block;font-size:8px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;padding:2px 8px;border-radius:8px;background:{0};color:#fff;margin-left:8px">{1}</span>'.format(color,txt)
 
@@ -178,33 +215,9 @@ def build_sku_html(sku_data, aos_d, prev_lbl, curr_lbl, main_kw_c=None, main_kw_
     _tsh_sign  = '+' if tinshed_d >= 0 else ''
     # Top SKU names for simple description
     _top_mms_names = [k[:28] for k, _ in mms_top[:2]]
-    mms_detail = []
-    if abs(prefab_d) > 0.002:
-        mms_detail.append(
-            '&#128204; <b>Prefab structures</b> cost {}{:.2f}&#8377;/Wp vs last month &mdash; '
-            'this is for Column &amp; Purlin material used in rooftop systems. '
-            'Vendor: Powergrout NS65 is the largest item here.'.format(_pref_sign, prefab_d)
-        )
-    if abs(tinshed_d) > 0.002:
-        mms_detail.append(
-            '&#128204; <b>Tin Shed / Terrace structures</b> {}{:.2f}&#8377;/Wp &mdash; '
-            'more terrace-style installs this month means more tin shed material was used.'.format(_tsh_sign, tinshed_d)
-        )
-    if _top_mms_names:
-        mms_detail.append(
-            '&#128204; <b>Top material items:</b> {} &mdash; '
-            'individual vendor prices are stable (under &#8377;0.02/Wp change). '
-            'Volume increase is the driver, not a rate hike.'.format(', '.join(_top_mms_names))
-        )
-    if abs(aos_d) > 0.04:
-        _aos_sign = '+' if aos_d >= 0 else ''
-        mms_detail.append(
-            '&#128228; <b>Why this happened:</b> Average system size went {}{:.2f}kW vs last month. '
-            'Bigger systems need more columns, purlins, and mounting material. '
-            'No vendor rate change &mdash; this is purely because we installed larger systems.'.format(_aos_sign, aos_d)
-        )
+    mms_detail = _sku_lines(a_mms, p_mms, top_n=5, min_rwp=0.002)
     if not mms_detail:
-        mms_detail = ['&#128994; MMS cost stable &mdash; no significant change in vendor rates or material mix.']
+        mms_detail = ['&#9989; MMS cost stable &mdash; no significant rate/mix change.']
 
     # Cable detail
     cab_c_wp, cab_p_wp, cab_d = deltas['Cables']
@@ -213,29 +226,9 @@ def build_sku_html(sku_data, aos_d, prev_lbl, curr_lbl, main_kw_c=None, main_kw_
     # Cable detail — vendor names, actual rates, simple language
     _polycab_rwp = (a_cab.get('Cu DC Cable 1C x 4 sqmm - Red-POLYCAB',{}).get('rwp',0)
                     or a_cab.get('Cu DC Cable 1C x 4 sqmm - Black-POLYCAB',{}).get('rwp',0))
-    cable_detail = []
-    if abs(polycab_contrib) > 0.002:
-        cable_detail.append(
-            '&#128204; <b>POLYCAB 4sqmm Copper DC Cable</b> &mdash; this vendor was newly added this month '
-            '(was 0%, now ~4% of cable spend). POLYCAB rate: &#8377;{:.2f}/Wp. '
-            'Adding a new vendor at a higher rate pushed up cable cost by ~&#8377;{:+.2f}/Wp.'.format(
-                _polycab_rwp, polycab_contrib)
-        )
-    if abs(al16_contrib) > 0.001:
-        _al16_sign = '+' if al16_contrib >= 0 else ''
-        cable_detail.append(
-            '&#128204; <b>16sqmm Aluminium Earthing Cable (JMV vendor)</b> &mdash; '
-            'used more of this thicker earthing cable this month (larger systems need it). '
-            'Impact: {}{:.2f}&#8377;/Wp on cable cost.'.format(_al16_sign, al16_contrib)
-        )
-    cable_detail.append(
-        '&#128204; <b>RR Kabel 4sqmm AC Flexible Wire</b> &mdash; rate went from '
-        '&#8377;0.16 to &#8377;0.18/Wp (+&#8377;0.019/Wp). RR Kabel is our main AC wire vendor.'
-    )
-    cable_detail.append(
-        '&#128228; <b>RR Kabel 4sqmm DC Cable</b> (biggest cable item, ~68% of cable cost) &mdash; '
-        'rate is flat. The main DC wiring vendor is stable; cost increase is from smaller items above.'
-    )
+    cable_detail = _sku_lines(a_cab, p_cab, top_n=5, min_rwp=0.002)
+    if not cable_detail:
+        cable_detail = ['&#9989; Cable rates stable &mdash; no vendor rate movement.']
 
     # Inverter detail
     inv_c_wp, inv_p_wp, inv_d = deltas['Inverter']
@@ -243,35 +236,17 @@ def build_sku_html(sku_data, aos_d, prev_lbl, curr_lbl, main_kw_c=None, main_kw_
     # Inverter detail — plain English, Sungrow named, rates shown
     _sg6_d = sg6_c - sg6_p
     _sg8_d = sg8_c - sg8_p
-    inv_detail = []
-    if sg6_c > 0 or sg6_p > 0:
-        inv_detail.append(
-            '&#128204; <b>Sungrow SG6RT (6kW 3-phase inverter)</b> &mdash; '
-            'rate: &#8377;{:.2f}&#8594;&#8377;{:.2f}/Wp ({}{:.2f}/Wp change). '
-            'Share of installs went from ~1.6% to ~2.6% this month. '
-            'Sungrow is our 3-phase inverter vendor.'.format(sg6_p, sg6_c, '+' if _sg6_d>=0 else '', _sg6_d)
-        )
-    if sg8_c > 0 or sg8_p > 0:
-        inv_detail.append(
-            '&#128204; <b>Sungrow SG8RT (8kW 3-phase inverter)</b> &mdash; '
-            'rate: &#8377;{:.2f}&#8594;&#8377;{:.2f}/Wp ({}{:.2f}/Wp change). '
-            'Share went from ~1.5% to ~2.3% this month.'.format(sg8_p, sg8_c, '+' if _sg8_d>=0 else '', _sg8_d)
-        )
-    inv_detail.append(
-        '&#128228; <b>Why this happened:</b> Customers with larger systems (above 5kW) need 3-phase inverters. '
-        'Since average system size increased this month, more 3-phase Sungrow inverters were installed. '
-        'Sungrow rates are flat &mdash; this is a mix shift, not a price hike.'
-    )
+    inv_detail = _sku_lines(a_inv, p_inv, top_n=5, min_rwp=0.002)
+    if not inv_detail:
+        inv_detail = ['&#9989; Inverter rates stable.']
 
     # Module detail
     mod_c_wp, mod_p_wp, mod_d = deltas['Module']
-    mod_detail = [
-        '&#128204; <b>540Wp Mono Bifacial DCR-PREMIER (our standard panel)</b> &mdash; '
-        'used in 98.9% of all installs. Rate this month: &#8377;20.07/Wp vs &#8377;20.02/Wp last month '
-        '({}{:.2f}/Wp change &mdash; very small). Panel procurement is stable.'.format('+' if mod_d>=0 else '',mod_d),
-        '&#128228; <b>Solar panels are our most stable cost item.</b> No rate change from supplier. '
-        'Small delta is just rounding across different system sizes.',
-    ]
+    a_mod,_,_ = agg(curr_p,['Module'])
+    p_mod,_,_ = agg(prev_p,['Module'])
+    mod_detail = _sku_lines(a_mod, p_mod, top_n=4, min_rwp=0.001)
+    if not mod_detail:
+        mod_detail = ['&#9989; Module rates stable &mdash; panel procurement unchanged.']
 
     mms_icon = '&#128308;' if mms_d > 0.05 else '&#128992;'
     cab_icon = '&#128992;' if cab_d > 0.02 else '&#128994;'
@@ -694,10 +669,13 @@ body{
   line-height:1.65;word-break:break-word;
 }
 .sku-line{
-  font-size:10px;color:#475569;
-  line-height:1.8;margin-bottom:2px;
-  word-break:break-word;
+  font-size:10.5px;color:#334155;
+  line-height:1.9;margin-bottom:4px;
+  word-break:break-word;overflow-wrap:anywhere;
+  padding:4px 0;
+  border-bottom:1px dashed #E5E7EB;
 }
+.sku-line:last-child{border-bottom:none}
 .sku-gm-badge{
   display:inline-block;font-size:8px;font-weight:700;
   padding:1px 7px;border-radius:6px;margin-left:5px;
@@ -711,16 +689,21 @@ body{
   overflow-x:auto;-webkit-overflow-scrolling:touch;
   border-radius:8px;border:1px solid #DBEAFE;
 }
-.cluster-wrap .data-table{min-width:480px;font-size:12px}
+.cluster-wrap .data-table{min-width:560px;font-size:12px;table-layout:auto}
 .cluster-wrap .data-table th{
   font-size:8px;padding:8px 9px;white-space:nowrap;
   color:#E0F2FE;border-bottom:2px solid #0369A1;
 }
 .cluster-wrap .data-table thead tr{background:#0284C7}
 .cluster-wrap .data-table td{
-  padding:9px 9px;font-size:12px;white-space:nowrap;
+  padding:9px 9px;font-size:12px;
+  vertical-align:top;
 }
-.cluster-wrap .data-table td.R{font-size:11.5px}
+.cluster-wrap .data-table td.R{font-size:11.5px;white-space:nowrap}
+.cluster-wrap .data-table td:last-child{
+  white-space:normal;word-break:break-word;overflow-wrap:anywhere;
+  max-width:320px;
+}
 .group-row td{
   background:#EFF6FF;color:#0369A1;
   font-weight:700;font-size:8.5px;text-transform:uppercase;
@@ -821,6 +804,16 @@ body{
   .header-meta{font-size:9.5px}
   .eyebrow{font-size:9px}
   .badge{font-size:9px;padding:3px 8px}
+
+  /* Force SKU grid into single column on mobile */
+  .sku-grid{grid-template-columns:1fr!important;gap:10px}
+  .sku-card{padding:11px 12px}
+  .sku-line{font-size:10.5px;line-height:1.95}
+
+  /* Cluster insight cell — wrap hard */
+  .cluster-wrap .data-table td:last-child{
+    max-width:260px;font-size:10.5px;line-height:1.7;
+  }
 
   .section{padding:14px 12px}
 
@@ -1482,38 +1475,135 @@ def build(data):
             delta_html = '<span class="up-good">&#9650; +{:.2f}pp</span>'.format(r['gm_d'])
         else:
             delta_html = '<span class="neutral">{:+.2f}pp</span>'.format(r['gm_d'])
-        # Build inline insight for this cluster
+        # ── Build DETAILED insight cell: badges + root cause + bridge + action ──
         _rv_d = det.get('rev_wp_d', 0)
         _ck_d = det.get('cogs_kw_d', 0) / 1000
         _ao_d = c['aos'] - p['aos'] if p['n'] else 0
-        _ins_parts = []
-        if abs(_rv_d) > 0.3:
-            _clr = '#059669' if _rv_d >= 0 else '#DC2626'
-            _ins_parts.append(
-                'Rev/Wp <b style="color:{}">{:+.2f}/Wp</b>'.format(_clr, _rv_d)
-            )
+        _aov_d = c['aov'] - p['aov'] if p['n'] else 0
+        _cat_d = det.get('cat_d', {})
+        # GM bridge decomposition
+        _rev_gm_pp = (_rv_d / p['rev_wp'] * p['gm']) if p.get('rev_wp') else 0
+        _cogs_gm_pp = -(_ck_d / p['rev_wp'] * 100) if p.get('rev_wp') else 0
+
+        # ── Badges (top of cell) ──
+        _badges = []
+        if abs(_rv_d) > 0.2:
+            if _rv_d < 0:
+                _badges.append('<span class="tag-rev">Rev/Wp &#8722;&#8377;{:.2f}</span>'.format(abs(_rv_d)))
+            else:
+                _badges.append('<span class="tag-ok">Rev/Wp +&#8377;{:.2f}</span>'.format(_rv_d))
         if abs(_ck_d) > 0.02:
-            _clr2 = '#DC2626' if _ck_d > 0 else '#059669'
-            _ins_parts.append(
-                'COGS <b style="color:{}">{:+.2f}/Wp</b>{}'.format(
-                    _clr2, _ck_d,
-                    ' (AoS {:+.1f}kW)'.format(_ao_d) if abs(_ao_d) > 0.1 else ''
+            if _ck_d > 0:
+                _badges.append('<span class="tag-cogs">COGS +&#8377;{:.2f}/Wp</span>'.format(_ck_d))
+            else:
+                _badges.append('<span class="tag-ok">COGS &#8722;&#8377;{:.2f}/Wp</span>'.format(abs(_ck_d)))
+        _badges_html = ' '.join(_badges) if _badges else ''
+
+        # ── Root cause line ──
+        _rc_parts = []
+        # Identify top COGS category mover
+        _top_cogs_cat = None
+        if _cat_d:
+            _rising_cat = sorted([(k,v) for k,v in _cat_d.items() if abs(v) > 0.03], key=lambda x: -abs(x[1]))
+            if _rising_cat:
+                _top_cogs_cat = _rising_cat[0]
+
+        # Build root cause story
+        if _rv_d < -0.5 and _ck_d > 0.02:
+            # Dual driver: price erosion + COGS up
+            _rc_parts.append(
+                'Revenue erosion &#8722;&#8377;{:.2f}/Wp ({:.2f}&#8594;{:.2f}) combined with COGS pressure +&#8377;{:.2f}/Wp '
+                '({:+.2f}kW AoS shift).'.format(abs(_rv_d), p['rev_wp'], c['rev_wp'], _ck_d, _ao_d)
+            )
+            if _top_cogs_cat:
+                _rc_parts.append(
+                    '{} is the biggest COGS mover ({:+.3f}/Wp).'.format(_top_cogs_cat[0], _top_cogs_cat[1])
                 )
+        elif _rv_d < -0.5:
+            _rc_parts.append(
+                'Rev/Wp dropped &#8377;{:.2f}&#8594;&#8377;{:.2f}/Wp ({:+.2f}/Wp). '
+                'AoS {:.2f}&#8594;{:.2f}kW ({:+.2f}). '
+                'Revenue realisation issue &mdash; check discount approvals &amp; offer-mix shift.'.format(
+                    p['rev_wp'], c['rev_wp'], _rv_d, p['aos'], c['aos'], _ao_d)
             )
-        if abs(c['gm'] - mtd_gm_ref) > 1.5:
-            _diff = c['gm'] - mtd_gm_ref
-            _clr3 = '#059669' if _diff > 0 else '#DC2626'
-            _ins_parts.append(
-                'GM <b style="color:{}">{:.1f}%</b> ({:+.1f}pp vs avg)'.format(_clr3, c['gm'], _diff)
+        elif _ck_d > 0.02:
+            # COGS up
+            if _top_cogs_cat:
+                _rc_parts.append(
+                    '{} COGS {:+.3f}/Wp is the main driver. '
+                    'Aligned with system-wide rate pattern. '
+                    'AoS {:+.2f}kW.'.format(_top_cogs_cat[0], _top_cogs_cat[1], _ao_d)
+                )
+            else:
+                _rc_parts.append('COGS creep +&#8377;{:.2f}/Wp &mdash; vendor rate drift.'.format(_ck_d))
+        elif _rv_d > 0.5:
+            _rc_parts.append(
+                'Strong realisation +&#8377;{:.2f}/Wp &mdash; pricing discipline holding.'.format(_rv_d)
             )
-        if not _ins_parts:
-            insight_cell = '<td style="font-size:10px;color:#94A3B8">Stable</td>'
+        elif _ck_d < -0.02:
+            _rc_parts.append('COGS &#8722;&#8377;{:.2f}/Wp &mdash; procurement efficiency flowing to GM.'.format(abs(_ck_d)))
         else:
-            insight_cell = (
-                '<td style="font-size:10px;color:#334155;line-height:1.7;min-width:140px">'
-                + '<br>'.join(_ins_parts)
-                + '</td>'
+            _rc_parts.append('All levers within normal band &mdash; operations stable.')
+
+        # Cluster GM vs blended comparison
+        if c['gm'] < 40:
+            _rc_parts.append('<b style="color:#B91C1C">GM &lt;40% &mdash; urgency flag.</b>')
+        elif abs(c['gm'] - mtd_gm_ref) > 1.5:
+            _diff_gm = c['gm'] - mtd_gm_ref
+            if _diff_gm < 0:
+                _rc_parts.append('GM {:.1f}pp below blended avg.'.format(abs(_diff_gm)))
+            else:
+                _rc_parts.append('GM {:+.1f}pp above blended avg.'.format(_diff_gm))
+
+        # ── GM bridge (always show when we have material moves) ──
+        _bridge_html = ''
+        if abs(_rev_gm_pp) > 0.1 or abs(_cogs_gm_pp) > 0.1:
+            _bridge_parts = []
+            if abs(_rev_gm_pp) > 0.05:
+                _clr_rev = '#059669' if _rev_gm_pp >= 0 else '#DC2626'
+                _bridge_parts.append(
+                    'Rev/Wp <span style="color:{}">{:+.2f}pp</span>'.format(_clr_rev, _rev_gm_pp)
+                )
+            if abs(_cogs_gm_pp) > 0.05:
+                _clr_co = '#059669' if _cogs_gm_pp >= 0 else '#DC2626'
+                _bridge_parts.append(
+                    'COGS <span style="color:{}">{:+.2f}pp</span>'.format(_clr_co, _cogs_gm_pp)
+                )
+            _bridge_parts.append(
+                'total <b>{:+.2f}pp</b>'.format(r['gm_d'])
             )
+            _bridge_html = (
+                '<div style="margin-top:6px;font-size:10px;color:#64748B;line-height:1.7">'
+                '<b>GM bridge:</b> {}</div>'
+            ).format(' &middot; '.join(_bridge_parts))
+
+        # ── Action recommendation ──
+        _action = ''
+        if _rv_d < -0.5 and c['gm'] < 42:
+            _action = 'Audit discount approvals &amp; cohort pricing in {}.'.format(r['cluster'])
+        elif _rv_d < -0.5:
+            _action = 'Review offer-mix &amp; realisation floor for {}.'.format(r['cluster'])
+        elif _ck_d > 0.03:
+            _action = 'Check vendor PO rates &amp; cable routing discipline.'
+        elif c['gm'] < 40:
+            _action = 'Escalate &mdash; Rev/Wp floor structurally low.'
+        elif r['gm_d'] > 0.3:
+            _action = 'Replicate winning pattern across peers.'
+        _action_html = ('<div style="margin-top:6px;font-size:10px;color:#B91C1C;font-weight:600">'
+                        '&#9888; Action: {}</div>'.format(_action)) if _action else ''
+
+        # Compose final insight cell
+        insight_cell = (
+            '<td style="font-size:10px;color:#334155;line-height:1.7;'
+            'min-width:180px;max-width:280px;white-space:normal;word-break:break-word;'
+            'padding:9px 11px;vertical-align:top">'
+            + (_badges_html + '<br>' if _badges_html else '')
+            + '<b style="color:#0F172A">Root cause:</b> '
+            + ' '.join(_rc_parts)
+            + _bridge_html
+            + _action_html
+            + '</td>'
+        )
         return (
             '<tr style="{}">'
             '<td style="font-weight:700">{}</td>'
