@@ -324,26 +324,13 @@ def build_sku_html(sku_data, aos_d, prev_lbl, curr_lbl, main_kw_c=None, main_kw_
     if not actions:
         actions.append('&#9989; No COGS procurement action required. All categories within acceptable band.')
 
-    # ── Actions footer bar ─────────────────────────────────────────────────
-    actions_html = ''
-    if actions:
-        actions_html = (
-            '<div style="margin-top:10px;padding:10px 14px;'
-            'background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;'
-            'font-size:10.5px;color:#92400E;line-height:1.9;word-break:break-word">'
-            '<b>&#9889; Procurement actions:</b><br>'
-            + '<br>'.join(actions) +
-            '</div>'
-        )
-
     html = ('{}<div class="sku-grid">'
-            '{}{}{}{}</div>{}').format(
+            '{}{}{}{}</div>').format(
         hl_html,
         row(mms_icon,'MMS',     mms_d,    mms_detail,    '#DC2626', mms_rc, gm_pp(mms_d), '#06B6D4'),
         row(cab_icon,'Cables',  cab_d,    cable_detail,  '#D97706', cab_rc, gm_pp(cab_d), '#10B981'),
         row(inv_icon,'Inverter',inv_d,    inv_detail,    '#D97706', inv_rc, gm_pp(inv_d), '#8B5CF6'),
-        row(mod_icon,'Module',  mod_d,    mod_detail,    '#16A34A', mod_rc, gm_pp(mod_d), '#3B82F6'),
-        actions_html)
+        row(mod_icon,'Module',  mod_d,    mod_detail,    '#16A34A', mod_rc, gm_pp(mod_d), '#3B82F6'))
     return html
 
 def fp(projects, start, end):
@@ -734,12 +721,6 @@ body{
   padding:9px 9px;font-size:12px;white-space:nowrap;
 }
 .cluster-wrap .data-table td.R{font-size:11.5px}
-.insight-td{
-  white-space:normal!important;word-break:break-word;
-  min-width:160px;max-width:260px;
-  font-size:10.5px!important;line-height:1.65;
-  padding:8px 10px!important;vertical-align:top!important;
-}
 .group-row td{
   background:#EFF6FF;color:#0369A1;
   font-weight:700;font-size:8.5px;text-transform:uppercase;
@@ -856,11 +837,10 @@ body{
   .tc-today{font-size:18px;margin-bottom:4px}
   .tc-prev{font-size:9px}
 
-  .sku-grid{gap:8px;grid-template-columns:1fr}
+  .sku-grid{gap:8px}
   .sku-cat{font-size:11px}
   .sku-line{font-size:9.5px}
   .sku-rc{font-size:8.5px}
-  .insight-td{min-width:130px!important;max-width:none!important;font-size:10px!important}
 
   .driver-chip{max-width:140px;font-size:9px}
 
@@ -1527,70 +1507,13 @@ def build(data):
                 'GM <b style="color:{}">{:.1f}%</b> ({:+.1f}pp vs avg)'.format(_clr3, c['gm'], _diff)
             )
         if not _ins_parts:
-            _ins_body = '<span style="color:#94A3B8">Stable &mdash; within band</span>'
+            insight_cell = '<td style="font-size:10px;color:#94A3B8">Stable</td>'
         else:
-            _ins_body = ' &nbsp;&#183;&nbsp; '.join(_ins_parts)
-
-        # Build chip tags row
-        _chip_parts = []
-        if abs(_rv_d) > 0.3:
-            _rc = '#B91C1C' if _rv_d < 0 else '#065F46'
-            _rb = '#FEE2E2' if _rv_d < 0 else '#DCFCE7'
-            _chip_parts.append(
-                '<span style="display:inline-block;font-size:8px;font-weight:700;'
-                'padding:2px 6px;border-radius:5px;background:{};color:{};'
-                'white-space:nowrap">Rev/Wp {:+.2f}/Wp</span>'.format(_rb,_rc,_rv_d))
-        if abs(_ck_d) > 0.02:
-            _cc = '#92400E' if _ck_d > 0 else '#065F46'
-            _cb = '#FEF3C7' if _ck_d > 0 else '#DCFCE7'
-            _chip_parts.append(
-                '<span style="display:inline-block;font-size:8px;font-weight:700;'
-                'padding:2px 6px;border-radius:5px;background:{};color:{};'
-                'white-space:nowrap">COGS {:+.3f}/Wp</span>'.format(_cb,_cc,_ck_d))
-
-        # Full driver narrative (drv_tag already built by get_driver)
-        _narr = r.get('drv_tag','')
-        _narr_html = ''
-        if _narr and _narr not in ('--','Stable'):
-            _narr_html = (
-                '<div style="font-size:9.5px;color:#475569;margin-top:4px;line-height:1.65">'
-                '{}</div>'.format(_narr))
-
-        # GM bridge mini-line
-        _gb_parts = []
-        if abs(_rv_d) > 0.2 and r['prev']['rev_wp']:
-            _rv_pp = _rv_d / r['prev']['rev_wp'] * r['prev']['gm']
-            _gb_parts.append('Rev {:+.2f}pp'.format(_rv_pp))
-        if abs(_ck_d) > 0.01 and r['prev']['rev_wp']:
-            _ck_pp = -(_ck_d / r['prev']['rev_wp'] * 100)
-            _gb_parts.append('COGS {:+.2f}pp'.format(_ck_pp))
-        if _gb_parts:
-            _gb_parts.append('<b>&#8594; {:+.2f}pp</b>'.format(r['gm_d']))
-            _narr_html += (
-                '<div style="font-size:9px;color:#94A3B8;margin-top:3px">'
-                'GM bridge: {}</div>'.format(' &middot; '.join(_gb_parts)))
-
-        # Action hint for declining clusters
-        _action_html = ''
-        if r['gm_d'] < -0.3:
-            _det_types = r['drv_det'].get('types',[])
-            if 'price_dn' in _det_types:
-                _act_txt = 'Audit discount approvals &amp; cohort Rev/Wp'
-            elif 'cogs_up' in _det_types:
-                _act_txt = 'Review vendor PO vs prior month'
-            else:
-                _act_txt = 'Deep-dive before month-end'
-            _action_html = (
-                '<div style="font-size:9px;font-weight:700;color:#B91C1C;margin-top:4px">'
-                '&#9888; Action: {}</div>'.format(_act_txt))
-
-        _chips_html = ('<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:5px">'
-                       + ''.join(_chip_parts) + '</div>') if _chip_parts else ''
-        insight_cell = (
-            '<td class="insight-td">'
-            + _chips_html + _ins_body + _narr_html + _action_html
-            + '</td>'
-        )
+            insight_cell = (
+                '<td style="font-size:10px;color:#334155;line-height:1.7;min-width:140px">'
+                + '<br>'.join(_ins_parts)
+                + '</td>'
+            )
         return (
             '<tr style="{}">'
             '<td style="font-weight:700">{}</td>'
@@ -1633,19 +1556,10 @@ def build(data):
         cl_tbody += '<tr class="group-row"><td colspan="6">&#9733; New / growing clusters</td></tr>'
         cl_tbody += ''.join(cl_row(r,'#FAF5FF') for r in nascent)
 
-    _ci_section = ''
-    if ci_cards:
-        _ci_section = (
-            '<div style="margin-top:16px">'
-            '<div class="sec-title" style="margin-bottom:10px">&#128202; Cluster Insights</div>'
-            + cluster_insights_html +
-            '</div>'
-        )
     cl_html = (
         '<div class="cluster-wrap">'
         '<table class="data-table">{}<tbody>{}</tbody></table></div>'
-        '{}'
-    ).format(cl_thead, cl_tbody, _ci_section)
+    ).format(cl_thead, cl_tbody)
 
     # ── CLUSTER INSIGHTS: short factual bullets per cluster (no actionables)
     def _ci_sign(v): return '+' if v >= 0 else ''
