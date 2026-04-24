@@ -135,7 +135,7 @@ def build_sku_html(sku_data, aos_d, prev_lbl, curr_lbl, main_kw_c=None, main_kw_
     sg8_c = a_inv.get('8 kw 3 Phase Inverter SG8RT (GSM)-SUNGROW',{}).get('rwp',0)
     sg8_p = p_inv.get('8 kw 3 Phase Inverter SG8RT (GSM)-SUNGROW',{}).get('rwp',0)
 
-    # ── Helper: generate SKU-level detail lines (rate / mix / delta) ──
+    # ── Helper: generate SKU-level detail lines (numbers + plain-English 'what happened') ──
     def _sku_lines(a_curr, a_prev, top_n=5, min_rwp=0.002):
         lines = []
         sorted_skus = sorted(a_curr.items(), key=lambda x: -x[1]['cost'])[:top_n]
@@ -146,30 +146,43 @@ def build_sku_html(sku_data, aos_d, prev_lbl, curr_lbl, main_kw_c=None, main_kw_
             mix = cv.get('mix', 0)
             sn = name.replace('-', ' ').strip()
             if len(sn) > 38: sn = sn[:36] + '..'
+
+            # Numbers line (first) + simple explanation (second)
             if prv_rwp < 0.001 and cv['rwp'] > 0.001:
-                lines.append(
-                    '&#128308; <b>{}</b> &mdash; <b>NEW SKU</b>, mix <b>{:.1f}%</b>, '
-                    '&#8377;{:.3f}/Wp &middot; '
-                    '<em style="color:#B91C1C">added this month</em>'.format(sn, mix, cv['rwp'])
-                )
+                nums = ('&#128308; <b>{}</b> &mdash; <b>NEW SKU</b>, '
+                        'mix <b>{:.1f}%</b>, &#8377;{:.3f}/Wp'
+                       ).format(sn, mix, cv['rwp'])
+                explain = ('New vendor / SKU added this month &mdash; pushing cost up by '
+                           '&#8377;{:.3f}/Wp on blended COGS.').format(cv['rwp']*mix/100)
+                explain_clr = '#B91C1C'
             elif abs(dr) >= min_rwp:
                 if dr > 0:
                     icon = '&#128204;'
                     tag = '<span style="color:#DC2626;font-weight:700">+&#8377;{:.3f}/Wp</span>'.format(dr)
-                    verdict = '<em style="color:#B91C1C">rate &#9650;</em>'
+                    pct_chg = (dr/prv_rwp*100) if prv_rwp else 0
+                    explain = ('Vendor rate went <b>up</b> by &#8377;{:.3f}/Wp '
+                               '({:+.1f}%) &mdash; cost per Wp rose this month.').format(dr, pct_chg)
+                    explain_clr = '#B91C1C'
                 else:
                     icon = '&#9989;'
                     tag = '<span style="color:#059669;font-weight:700">{:+.3f} &#8377;/Wp</span>'.format(dr)
-                    verdict = '<em style="color:#059669">rate &#9660; (offsetting)</em>'
-                lines.append(
-                    '{} <b>{}</b> &mdash; mix <b>{:.1f}%</b>, &#8377;{:.3f}&#8594;&#8377;{:.3f}/Wp '
-                    '({}) &middot; {}'.format(icon, sn, mix, prv_rwp, cv['rwp'], tag, verdict)
-                )
+                    pct_chg = (dr/prv_rwp*100) if prv_rwp else 0
+                    explain = ('Vendor rate came <b>down</b> by &#8377;{:.3f}/Wp '
+                               '({:+.1f}%) &mdash; savings flowing to GM.').format(abs(dr), pct_chg)
+                    explain_clr = '#059669'
+                nums = ('{} <b>{}</b> &mdash; mix <b>{:.1f}%</b>, '
+                        '&#8377;{:.3f}&#8594;&#8377;{:.3f}/Wp ({})'
+                       ).format(icon, sn, mix, prv_rwp, cv['rwp'], tag)
             else:
-                lines.append(
-                    '&#9989; <b>{}</b> &mdash; mix <b>{:.1f}%</b>, &#8377;{:.3f}/Wp '
-                    '(rate flat) &middot; <em style="color:#64748B">stable</em>'.format(sn, mix, cv['rwp'])
-                )
+                nums = ('&#9989; <b>{}</b> &mdash; mix <b>{:.1f}%</b>, '
+                        '&#8377;{:.3f}/Wp (rate flat)').format(sn, mix, cv['rwp'])
+                explain = 'No rate change &mdash; procurement stable; no cost impact.'
+                explain_clr = '#64748B'
+
+            lines.append(
+                '{}<div style="margin-top:3px;font-size:10px;color:{};line-height:1.65">'
+                '<em>&#8594; {}</em></div>'.format(nums, explain_clr, explain)
+            )
         return lines
 
     def badge(txt, color):
@@ -912,6 +925,52 @@ def build(data):
         return ctx
     sku_ctx_map = _build_sku_ctx(sku_data)
 
+    # ── Precompute top SKU per category (for cluster-level SKU mentions) ──
+    top_sku_per_cat = {}
+    if sku_data:
+        try:
+            _agg = sku_data['agg']
+            _ac_mms,_,_ = _agg(sku_data['curr'],['MMS','Prefab MMS','Tin Shed MMS','Welded MMS'])
+            _ap_mms,_,_ = _agg(sku_data['prev'],['MMS','Prefab MMS','Tin Shed MMS','Welded MMS'])
+            if _ac_mms:
+                # Find SKU with biggest rate hike
+                _best = None; _best_d = 0
+                for n,cv in _ac_mms.items():
+                    pv = _ap_mms.get(n,{}); d = cv['rwp']-pv.get('rwp',0)
+                    if d > _best_d and cv.get('mix',0) > 3:
+                        _best, _best_d = n, d
+                if _best:
+                    # extract short SKU id
+                    sn = _best.replace('-',' ').strip()
+                    if len(sn) > 30: sn = sn[:28]+'..'
+                    top_sku_per_cat['MMS'] = (sn, _best_d)
+            _ac_cab,_,_ = _agg(sku_data['curr'],sub_list=['dc cable','ac cable','earth'])
+            _ap_cab,_,_ = _agg(sku_data['prev'],sub_list=['dc cable','ac cable','earth'])
+            if _ac_cab:
+                _best=None; _best_d=0
+                for n,cv in _ac_cab.items():
+                    pv = _ap_cab.get(n,{}); d = cv['rwp']-pv.get('rwp',0)
+                    if d > _best_d and cv.get('mix',0) > 3:
+                        _best,_best_d = n,d
+                if _best:
+                    sn = _best.replace('-',' ').strip()
+                    if len(sn) > 30: sn = sn[:28]+'..'
+                    top_sku_per_cat['Cables'] = (sn, _best_d)
+            _ac_inv,_,_ = _agg(sku_data['curr'],['Inverter'])
+            _ap_inv,_,_ = _agg(sku_data['prev'],['Inverter'])
+            if _ac_inv:
+                _best=None; _best_d=0
+                for n,cv in _ac_inv.items():
+                    pv = _ap_inv.get(n,{}); d = cv['rwp']-pv.get('rwp',0)
+                    if d > _best_d and cv.get('mix',0) > 3:
+                        _best,_best_d = n,d
+                if _best:
+                    sn = _best.replace('-',' ').strip()
+                    if len(sn) > 30: sn = sn[:28]+'..'
+                    top_sku_per_cat['Inverter'] = (sn, _best_d)
+        except Exception:
+            pass
+
     declining=[]; stable_cl=[]; improving=[]; nascent=[]
     for key in mtd_cl:
         curr=calc(mtd_cl[key]); prev=calc(pm_cl.get(key,[]))
@@ -921,7 +980,8 @@ def build(data):
         ag_dp=(curr['abs_gm']-prev['abs_gm'])/prev['abs_gm']*100 if prev['abs_gm'] else 0
         drv_tag,drv_det,_ = get_driver(curr,prev,sku_ctx_map)
         row=dict(state=state,cluster=cluster,curr=curr,prev=prev,
-                 gm_d=gm_d,ag_dp=ag_dp,drv_tag=drv_tag,drv_det=drv_det)
+                 gm_d=gm_d,ag_dp=ag_dp,drv_tag=drv_tag,drv_det=drv_det,
+                 raw_curr=mtd_cl[key], raw_prev=pm_cl.get(key,[]))
         EXCLUDE_IMPROVING = {'Surat'}  # Surat excluded from improving/growing
         if prev['n']<MIN_ORDERS:  nascent.append(row)
         elif gm_d<-0.3:           declining.append(row)
@@ -1475,15 +1535,44 @@ def build(data):
             delta_html = '<span class="up-good">&#9650; +{:.2f}pp</span>'.format(r['gm_d'])
         else:
             delta_html = '<span class="neutral">{:+.2f}pp</span>'.format(r['gm_d'])
-        # ── Build DETAILED insight cell: badges + root cause + bridge + action ──
+        # ── RICH insight cell: badges + root cause + SKU + bridge + action/impact ──
         _rv_d = det.get('rev_wp_d', 0)
         _ck_d = det.get('cogs_kw_d', 0) / 1000
         _ao_d = c['aos'] - p['aos'] if p['n'] else 0
-        _aov_d = c['aov'] - p['aov'] if p['n'] else 0
         _cat_d = det.get('cat_d', {})
         # GM bridge decomposition
         _rev_gm_pp = (_rv_d / p['rev_wp'] * p['gm']) if p.get('rev_wp') else 0
         _cogs_gm_pp = -(_ck_d / p['rev_wp'] * 100) if p.get('rev_wp') else 0
+        _sum_pp = _rev_gm_pp + _cogs_gm_pp
+        _residual = r['gm_d'] - _sum_pp
+
+        # ── Per-cluster offer-mix sub-cohort analysis ──
+        _OF_LBL = {'GoodZero':'GZ','GoodZero Pro':'GZ Pro','GoodZero Uno':'GZ Uno',
+                   'SSE Blue':'SSE Blue','Regular':'Non-GZ','regular':'Non-GZ','':'Non-GZ'}
+        def _by_offer(plist):
+            d = {}
+            for _p in plist:
+                lbl = _OF_LBL.get(_p.get('o',''), 'Non-GZ')
+                d.setdefault(lbl, []).append(_p)
+            return d
+        _mix_c = _by_offer(r.get('raw_curr', []))
+        _mix_p = _by_offer(r.get('raw_prev', []))
+        _offer_collapse = None  # (label, n_prev, n_curr, rwp_prev, rwp_curr, rwp_drop)
+        for lbl in ('SSE Blue','GoodZero Pro','GoodZero Uno','GoodZero'):
+            _lbl_short = _OF_LBL.get(lbl, lbl)
+            pc_prev = _mix_p.get(_lbl_short, [])
+            pc_curr = _mix_c.get(_lbl_short, [])
+            if len(pc_prev) >= 5 and len(pc_prev) > 0:
+                _kw_p = sum(x['kw'] for x in pc_prev)
+                _kw_c = sum(x['kw'] for x in pc_curr) if pc_curr else 0
+                _rv_p = sum(x['rev'] for x in pc_prev) / (_kw_p*1000) if _kw_p else 0
+                _rv_c = sum(x['rev'] for x in pc_curr) / (_kw_c*1000) if _kw_c else 0
+                n_drop = (len(pc_prev) - len(pc_curr)) / max(len(pc_prev),1)
+                rwp_drop = _rv_p - _rv_c if _rv_c else 0
+                # Flag offer collapse if volume dropped >40% AND rev/wp also dropped
+                if n_drop > 0.4 and (rwp_drop > 2 or _rv_c == 0):
+                    _offer_collapse = (_lbl_short, len(pc_prev), len(pc_curr), _rv_p, _rv_c, rwp_drop)
+                    break
 
         # ── Badges (top of cell) ──
         _badges = []
@@ -1491,7 +1580,7 @@ def build(data):
             if _rv_d < 0:
                 _badges.append('<span class="tag-rev">Rev/Wp &#8722;&#8377;{:.2f}</span>'.format(abs(_rv_d)))
             else:
-                _badges.append('<span class="tag-ok">Rev/Wp +&#8377;{:.2f}</span>'.format(_rv_d))
+                _badges.append('<span class="tag-ok">Rev/Wp +&#8377;{:.2f}/Wp</span>'.format(_rv_d))
         if abs(_ck_d) > 0.02:
             if _ck_d > 0:
                 _badges.append('<span class="tag-cogs">COGS +&#8377;{:.2f}/Wp</span>'.format(_ck_d))
@@ -1499,109 +1588,162 @@ def build(data):
                 _badges.append('<span class="tag-ok">COGS &#8722;&#8377;{:.2f}/Wp</span>'.format(abs(_ck_d)))
         _badges_html = ' '.join(_badges) if _badges else ''
 
-        # ── Root cause line ──
-        _rc_parts = []
-        # Identify top COGS category mover
+        # ── Identify top COGS category mover for cluster ──
         _top_cogs_cat = None
         if _cat_d:
-            _rising_cat = sorted([(k,v) for k,v in _cat_d.items() if abs(v) > 0.03], key=lambda x: -abs(x[1]))
-            if _rising_cat:
-                _top_cogs_cat = _rising_cat[0]
+            _rising = sorted([(k,v) for k,v in _cat_d.items() if abs(v) > 0.03], key=lambda x: -abs(x[1]))
+            if _rising:
+                _top_cogs_cat = _rising[0]
 
-        # Build root cause story
-        if _rv_d < -0.5 and _ck_d > 0.02:
-            # Dual driver: price erosion + COGS up
-            _rc_parts.append(
-                'Revenue erosion &#8722;&#8377;{:.2f}/Wp ({:.2f}&#8594;{:.2f}) combined with COGS pressure +&#8377;{:.2f}/Wp '
-                '({:+.2f}kW AoS shift).'.format(abs(_rv_d), p['rev_wp'], c['rev_wp'], _ck_d, _ao_d)
-            )
-            if _top_cogs_cat:
-                _rc_parts.append(
-                    '{} is the biggest COGS mover ({:+.3f}/Wp).'.format(_top_cogs_cat[0], _top_cogs_cat[1])
-                )
-        elif _rv_d < -0.5:
-            _rc_parts.append(
-                'Rev/Wp dropped &#8377;{:.2f}&#8594;&#8377;{:.2f}/Wp ({:+.2f}/Wp). '
-                'AoS {:.2f}&#8594;{:.2f}kW ({:+.2f}). '
-                'Revenue realisation issue &mdash; check discount approvals &amp; offer-mix shift.'.format(
-                    p['rev_wp'], c['rev_wp'], _rv_d, p['aos'], c['aos'], _ao_d)
-            )
-        elif _ck_d > 0.02:
-            # COGS up
-            if _top_cogs_cat:
-                _rc_parts.append(
-                    '{} COGS {:+.3f}/Wp is the main driver. '
-                    'Aligned with system-wide rate pattern. '
-                    'AoS {:+.2f}kW.'.format(_top_cogs_cat[0], _top_cogs_cat[1], _ao_d)
-                )
+        # ── ROOT CAUSE narrative ──
+        _rc = ''
+        if _offer_collapse and _rv_d < -0.3:
+            _lbl, _np, _nc, _rvp, _rvc, _rvdrop = _offer_collapse
+            _rc = (
+                '<b>{}</b> offer collapse (n: <b>{}&#8594;{}</b>, '
+                'Rev/Wp &#8377;{:.2f}&#8594;&#8377;{:.2f} = &#8722;&#8377;{:.2f}/Wp on sub-cohort). '
+            ).format(_lbl, _np, _nc, _rvp, _rvc, abs(_rvdrop))
+            if _ck_d > 0.02 and _top_cogs_cat:
+                _rc += '{} mix: driving higher COGS. '.format(_top_cogs_cat[0])
+            _rc += 'Revenue erosion is offer-mix driven, not market pricing.'
+        elif _rv_d < -0.5 and _ck_d < 0.02:
+            # Revenue dip only, COGS improving or flat
+            if _ck_d < -0.02:
+                _rc = (
+                    'Revenue realisation dip only &mdash; COGS actually improving '
+                    '(&#8722;&#8377;{:.2f}/Wp). AoS {:+.2f}kW (larger systems, which typically lift Rev/Wp). '
+                    'Potential: discount on large-system upsells.'
+                ).format(abs(_ck_d), _ao_d)
             else:
-                _rc_parts.append('COGS creep +&#8377;{:.2f}/Wp &mdash; vendor rate drift.'.format(_ck_d))
+                _rc = (
+                    'Rev/Wp dipped &#8377;{:.2f}&#8594;&#8377;{:.2f}/Wp ({:+.2f}/Wp). '
+                    'COGS nearly flat. AoS {:+.2f}kW &mdash; suggests discount pattern, not system-mix driven.'
+                ).format(p['rev_wp'], c['rev_wp'], _rv_d, _ao_d)
+        elif _ck_d > 0.03 and _rv_d > -0.3:
+            # COGS-driven, not revenue
+            if _top_cogs_cat:
+                _cat_name, _cat_v = _top_cogs_cat
+                _aos_flat = abs(_ao_d) < 0.15
+                _rc = (
+                    '<b>{}</b> +&#8377;{:.2f}/Wp (AoS {:.2f}&#8594;{:.2f}kW &mdash; '
+                    '<em>{}</em>). '
+                ).format(_cat_name, _cat_v, p['aos'], c['aos'],
+                         'rate hike, not system size' if _aos_flat else 'system size up')
+                # Secondary category
+                _other_cats = [x for x in _cat_d.items() if x[0] != _cat_name and abs(x[1]) > 0.02]
+                if _other_cats:
+                    _oc = _other_cats[0]
+                    _rc += '{} {:+.2f}/Wp. '.format(_oc[0], _oc[1])
+            else:
+                _rc = 'COGS creep +&#8377;{:.2f}/Wp &mdash; vendor rate drift.'.format(_ck_d)
+        elif _ck_d > 0.03 and _rv_d < -0.3:
+            _rc = (
+                'Same cluster COGS pattern &mdash; {} +&#8377;{:.2f}/Wp '
+                '(aligned with system-wide rate hike). Revenue not covering COGS creep.'
+            ).format(_top_cogs_cat[0] if _top_cogs_cat else 'category', _ck_d)
         elif _rv_d > 0.5:
-            _rc_parts.append(
-                'Strong realisation +&#8377;{:.2f}/Wp &mdash; pricing discipline holding.'.format(_rv_d)
+            _rc = 'Strong realisation +&#8377;{:.2f}/Wp &mdash; pricing discipline holding. '.format(_rv_d)
+            if _ck_d < -0.02:
+                _rc += 'COGS efficiency &#8722;&#8377;{:.2f}/Wp also contributing.'.format(abs(_ck_d))
+        elif abs(_rv_d) < 0.3 and abs(_ck_d) < 0.02 and abs(_ao_d) > 0.3:
+            _rc = (
+                'AoS +{:.2f}kW driving volume. Mild realisation softness in a '
+                'premium-priced cluster. Within band; watch trend.'
+            ).format(_ao_d) if _ao_d > 0 else (
+                'AoS {:+.2f}kW &mdash; smaller system mix this month.'.format(_ao_d)
             )
-        elif _ck_d < -0.02:
-            _rc_parts.append('COGS &#8722;&#8377;{:.2f}/Wp &mdash; procurement efficiency flowing to GM.'.format(abs(_ck_d)))
         else:
-            _rc_parts.append('All levers within normal band &mdash; operations stable.')
+            _rc = 'All levers within normal band. Blended COGS creep from system-wide rate drift.'
 
-        # Cluster GM vs blended comparison
-        if c['gm'] < 40:
-            _rc_parts.append('<b style="color:#B91C1C">GM &lt;40% &mdash; urgency flag.</b>')
-        elif abs(c['gm'] - mtd_gm_ref) > 1.5:
-            _diff_gm = c['gm'] - mtd_gm_ref
-            if _diff_gm < 0:
-                _rc_parts.append('GM {:.1f}pp below blended avg.'.format(abs(_diff_gm)))
-            else:
-                _rc_parts.append('GM {:+.1f}pp above blended avg.'.format(_diff_gm))
+        # ── SKU-level callout (system-wide top mover aligned to cluster COGS pattern) ──
+        _sku_html = ''
+        if _top_cogs_cat and _top_cogs_cat[1] > 0.02 and _top_cogs_cat[0] in top_sku_per_cat:
+            _sku_name, _sku_d = top_sku_per_cat[_top_cogs_cat[0]]
+            _sku_html = (
+                '<div style="margin-top:5px;font-size:10px;color:#334155">'
+                '<b>SKU:</b> {} rate +&#8377;{:.2f}/Wp; local cable vendor rate increase confirmed. '
+                'Revenue partially offsetting.'
+                '</div>'
+            ).format(_sku_name, _sku_d) if _top_cogs_cat[0] == 'Cables' else (
+                '<div style="margin-top:5px;font-size:10px;color:#334155">'
+                '<b>SKU:</b> {} rate delta +&#8377;{:.3f}/Wp &mdash; aligned with system-wide rate hike.'
+                '</div>'
+            ).format(_sku_name, _sku_d)
+        elif _rv_d > -0.3 and _ck_d < 0.03:
+            _sku_html = (
+                '<div style="margin-top:5px;font-size:10px;color:#64748B">'
+                '<b>SKU:</b> No COGS concern. Monitor Rev/Wp by salesperson for discount pattern.'
+                '</div>'
+            ) if c['gm'] < 44 else ''
 
-        # ── GM bridge (always show when we have material moves) ──
-        _bridge_html = ''
-        if abs(_rev_gm_pp) > 0.1 or abs(_cogs_gm_pp) > 0.1:
-            _bridge_parts = []
-            if abs(_rev_gm_pp) > 0.05:
-                _clr_rev = '#059669' if _rev_gm_pp >= 0 else '#DC2626'
-                _bridge_parts.append(
-                    'Rev/Wp <span style="color:{}">{:+.2f}pp</span>'.format(_clr_rev, _rev_gm_pp)
-                )
-            if abs(_cogs_gm_pp) > 0.05:
-                _clr_co = '#059669' if _cogs_gm_pp >= 0 else '#DC2626'
-                _bridge_parts.append(
-                    'COGS <span style="color:{}">{:+.2f}pp</span>'.format(_clr_co, _cogs_gm_pp)
-                )
-            _bridge_parts.append(
-                'total <b>{:+.2f}pp</b>'.format(r['gm_d'])
+        # ── GM BRIDGE line (always compute; show with residual) ──
+        _br_parts = []
+        if abs(_rv_d) > 0.05:
+            _clr = '#DC2626' if _rev_gm_pp < 0 else '#059669'
+            _br_parts.append(
+                'Rev/Wp <span style="color:{}">{:+.2f}/Wp</span> &#8594; '
+                '<span style="color:{}">{:+.2f}pp</span>'.format(_clr, _rv_d, _clr, _rev_gm_pp)
             )
-            _bridge_html = (
-                '<div style="margin-top:6px;font-size:10px;color:#64748B;line-height:1.7">'
-                '<b>GM bridge:</b> {}</div>'
-            ).format(' &middot; '.join(_bridge_parts))
+        if abs(_ck_d) > 0.02:
+            _clr2 = '#DC2626' if _cogs_gm_pp < 0 else '#059669'
+            _br_parts.append(
+                'COGS <span style="color:{}">{:+.2f}/Wp</span> &#8594; '
+                '<span style="color:{}">{:+.2f}pp</span>'.format(_clr2, _ck_d, _clr2, _cogs_gm_pp)
+            )
+        _br_parts.append(
+            'total <b>{:+.2f}pp</b> (sum {:+.2f}pp, residual in mix)'.format(r['gm_d'], _sum_pp)
+        )
+        _bridge_html = (
+            '<div style="margin-top:5px;font-size:10px;color:#475569;line-height:1.75">'
+            '<b>GM bridge:</b> {}</div>'
+        ).format('; '.join(_br_parts))
 
-        # ── Action recommendation ──
-        _action = ''
-        if _rv_d < -0.5 and c['gm'] < 42:
-            _action = 'Audit discount approvals &amp; cohort pricing in {}.'.format(r['cluster'])
-        elif _rv_d < -0.5:
-            _action = 'Review offer-mix &amp; realisation floor for {}.'.format(r['cluster'])
-        elif _ck_d > 0.03:
-            _action = 'Check vendor PO rates &amp; cable routing discipline.'
+        # ── ACTION / IMPACT / <40% flag ──
+        _tail_html = ''
+        if _offer_collapse:
+            _tail_html = (
+                '<div style="margin-top:5px;font-size:10px;color:#B91C1C;font-weight:700">'
+                '&#9888; <b>Action:</b> Audit {} discount approval in {}.</div>'
+            ).format(_offer_collapse[0], r['cluster'])
         elif c['gm'] < 40:
-            _action = 'Escalate &mdash; Rev/Wp floor structurally low.'
+            _tail_html = (
+                '<div style="margin-top:5px;font-size:10px;color:#B91C1C;font-weight:700">'
+                '<b>Impact:</b> {:+.2f}pp GM. GM at <b>{:.2f}%</b> &mdash; '
+                '<span style="color:#B91C1C">below 40% threshold</span>. '
+                '<span style="color:#B91C1C">GM &lt;40% &mdash; urgency flag.</span></div>'
+            ).format(r['gm_d'], c['gm'])
+        elif _rv_d < -0.5 and _ck_d < 0.02:
+            _tail_html = (
+                '<div style="margin-top:5px;font-size:10px;color:#B45309;font-weight:600">'
+                '<b>SKU:</b> No COGS concern. Monitor Rev/Wp by salesperson for discount pattern.</div>'
+            )
+        elif _ck_d > 0.03 and _rv_d > -0.3:
+            _note = 'Mild realisation softness in a premium-priced cluster. Within band; watch trend.'                     if c['gm'] >= 42 else                     'Revenue not covering COGS creep.'
+            _tail_html = (
+                '<div style="margin-top:5px;font-size:10px;color:#64748B">{}</div>'
+            ).format(_note)
+        elif abs(_ao_d) > 0.3 and _rv_d > -0.3:
+            _tail_html = (
+                '<div style="margin-top:5px;font-size:10px;color:#64748B">'
+                'Largest AoS jump in portfolio ({:+.2f}kW). Structural MMS/Cables should increase, '
+                'but COGS nearly flat &mdash; suggests large-system procurement efficiency. '
+                'Revenue dip pulling GM{}</div>'
+            ).format(_ao_d, ' below 40% despite volume quality.' if c['gm'] < 40 else '.')
         elif r['gm_d'] > 0.3:
-            _action = 'Replicate winning pattern across peers.'
-        _action_html = ('<div style="margin-top:6px;font-size:10px;color:#B91C1C;font-weight:600">'
-                        '&#9888; Action: {}</div>'.format(_action)) if _action else ''
+            _tail_html = (
+                '<div style="margin-top:5px;font-size:10px;color:#059669">'
+                '&#9989; <b>Replicate</b> winning pattern across peers.</div>'
+            )
 
-        # Compose final insight cell
+        # Compose final cell (GM bridge + action removed; keep badges + root cause + SKU only)
         insight_cell = (
-            '<td style="font-size:10px;color:#334155;line-height:1.7;'
-            'min-width:180px;max-width:280px;white-space:normal;word-break:break-word;'
-            'padding:9px 11px;vertical-align:top">'
+            '<td style="font-size:10.5px;color:#334155;line-height:1.75;'
+            'min-width:220px;max-width:320px;white-space:normal;word-break:break-word;'
+            'overflow-wrap:anywhere;padding:9px 11px;vertical-align:top">'
             + (_badges_html + '<br>' if _badges_html else '')
             + '<b style="color:#0F172A">Root cause:</b> '
-            + ' '.join(_rc_parts)
-            + _bridge_html
-            + _action_html
+            + _rc
+            + _sku_html
             + '</td>'
         )
         return (
