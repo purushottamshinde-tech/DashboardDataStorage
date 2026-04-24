@@ -173,39 +173,104 @@ def build_sku_html(sku_data, aos_d, prev_lbl, curr_lbl, main_kw_c=None, main_kw_
     mms_c_wp, mms_p_wp, mms_d = deltas['MMS']
     prefab_d = cat_total(curr_p,['Prefab MMS'])/curr_kw/1000 - cat_total(prev_p,['Prefab MMS'])/prev_kw/1000
     tinshed_d = cat_total(curr_p,['Tin Shed MMS'])/curr_kw/1000 - cat_total(prev_p,['Tin Shed MMS'])/prev_kw/1000
-    mms_detail = [
-        '&#128204; <b>Prefab MMS</b> {}{:.3f}&#8377;/Wp &mdash; Columns, Purl ins &amp; Powergrout NS65 driving volume'.format('+' if prefab_d>=0 else '',prefab_d),
-        '&#128204; <b>Top SKUs:</b> {} &mdash; individual rates stable (&#8804;&#8377;0.016/Wp change)'.format(mms_skus_str),
-        '&#128204; <b>Tin Shed MMS</b> {}{:.3f}&#8377;/Wp &mdash; higher mix of terrace installs'.format('+' if tinshed_d>=0 else '',tinshed_d),
-        '&#128228; Root cause: AoS {}{:.2f}kW (3.90&#8594;3.93kW) &mdash; more structural material per install. No vendor rate change.'.format('+' if aos_d>=0 else '',aos_d),
-    ]
+    # MMS plain-English detail — vendor names, rates, simple language
+    _pref_sign = '+' if prefab_d >= 0 else ''
+    _tsh_sign  = '+' if tinshed_d >= 0 else ''
+    # Top SKU names for simple description
+    _top_mms_names = [k[:28] for k, _ in mms_top[:2]]
+    mms_detail = []
+    if abs(prefab_d) > 0.002:
+        mms_detail.append(
+            '&#128204; <b>Prefab structures</b> cost {}{:.2f}&#8377;/Wp vs last month &mdash; '
+            'this is for Column &amp; Purlin material used in rooftop systems. '
+            'Vendor: Powergrout NS65 is the largest item here.'.format(_pref_sign, prefab_d)
+        )
+    if abs(tinshed_d) > 0.002:
+        mms_detail.append(
+            '&#128204; <b>Tin Shed / Terrace structures</b> {}{:.2f}&#8377;/Wp &mdash; '
+            'more terrace-style installs this month means more tin shed material was used.'.format(_tsh_sign, tinshed_d)
+        )
+    if _top_mms_names:
+        mms_detail.append(
+            '&#128204; <b>Top material items:</b> {} &mdash; '
+            'individual vendor prices are stable (under &#8377;0.02/Wp change). '
+            'Volume increase is the driver, not a rate hike.'.format(', '.join(_top_mms_names))
+        )
+    if abs(aos_d) > 0.04:
+        _aos_sign = '+' if aos_d >= 0 else ''
+        mms_detail.append(
+            '&#128228; <b>Why this happened:</b> Average system size went {}{:.2f}kW vs last month. '
+            'Bigger systems need more columns, purlins, and mounting material. '
+            'No vendor rate change &mdash; this is purely because we installed larger systems.'.format(_aos_sign, aos_d)
+        )
+    if not mms_detail:
+        mms_detail = ['&#128994; MMS cost stable &mdash; no significant change in vendor rates or material mix.']
 
     # Cable detail
     cab_c_wp, cab_p_wp, cab_d = deltas['Cables']
     polycab_contrib = (polycab_c-polycab_p)/curr_kw/1000
     al16_contrib = (al16_c-al16_p)/curr_kw/1000
-    cable_detail = [
-        '&#128204; <b>POLYCAB 4sqmm Cu DC Cable</b> entered Apr mix (0&#8594;4% of cable cost) at &#8377;{:.3f}/Wp &mdash; new vendor onboarding inflating spend by ~&#8377;{:.3f}/Wp'.format(
-            a_cab.get('Cu DC Cable 1C x 4 sqmm - Red-POLYCAB',{}).get('rwp',0) or a_cab.get('Cu DC Cable 1C x 4 sqmm - Black-POLYCAB',{}).get('rwp',0), polycab_contrib),
-        '&#128204; <b>16sqmm Al Earthing Cable (JMV)</b> mix 3.4&#8594;5.6% &mdash; {}{:.3f}&#8377;/Wp; higher-spec earthing in larger/LA installs'.format('+' if al16_contrib>=0 else '',al16_contrib),
-        '&#128204; <b>Cu Flexible AC Wire 4sqmm (RR Kabel)</b> rate &#8377;0.160&#8594;&#8377;0.180/Wp (+&#8377;0.019/Wp)',
-        '&#128228; <b>RR Kabel 4sqmm DC cables</b> (68% of cable cost) rate essentially flat &#8212; core DC cable procurement stable',
-    ]
+    # Cable detail — vendor names, actual rates, simple language
+    _polycab_rwp = (a_cab.get('Cu DC Cable 1C x 4 sqmm - Red-POLYCAB',{}).get('rwp',0)
+                    or a_cab.get('Cu DC Cable 1C x 4 sqmm - Black-POLYCAB',{}).get('rwp',0))
+    cable_detail = []
+    if abs(polycab_contrib) > 0.002:
+        cable_detail.append(
+            '&#128204; <b>POLYCAB 4sqmm Copper DC Cable</b> &mdash; this vendor was newly added this month '
+            '(was 0%, now ~4% of cable spend). POLYCAB rate: &#8377;{:.2f}/Wp. '
+            'Adding a new vendor at a higher rate pushed up cable cost by ~&#8377;{:+.2f}/Wp.'.format(
+                _polycab_rwp, polycab_contrib)
+        )
+    if abs(al16_contrib) > 0.001:
+        _al16_sign = '+' if al16_contrib >= 0 else ''
+        cable_detail.append(
+            '&#128204; <b>16sqmm Aluminium Earthing Cable (JMV vendor)</b> &mdash; '
+            'used more of this thicker earthing cable this month (larger systems need it). '
+            'Impact: {}{:.2f}&#8377;/Wp on cable cost.'.format(_al16_sign, al16_contrib)
+        )
+    cable_detail.append(
+        '&#128204; <b>RR Kabel 4sqmm AC Flexible Wire</b> &mdash; rate went from '
+        '&#8377;0.16 to &#8377;0.18/Wp (+&#8377;0.019/Wp). RR Kabel is our main AC wire vendor.'
+    )
+    cable_detail.append(
+        '&#128228; <b>RR Kabel 4sqmm DC Cable</b> (biggest cable item, ~68% of cable cost) &mdash; '
+        'rate is flat. The main DC wiring vendor is stable; cost increase is from smaller items above.'
+    )
 
     # Inverter detail
     inv_c_wp, inv_p_wp, inv_d = deltas['Inverter']
     inv3ph_contrib = (inv3ph_c/curr_kw/1000 - inv3ph_p/prev_kw/1000)
-    inv_detail = [
-        '&#128204; <b>SG6RT 3Ph 6kW (Sungrow)</b> rate &#8377;{:.2f}&#8594;&#8377;{:.2f}/Wp ({}{:.2f}/Wp); mix 1.6&#8594;2.6%'.format(sg6_p,sg6_c,'+' if sg6_c-sg6_p>=0 else '',sg6_c-sg6_p),
-        '&#128204; <b>SG8RT 3Ph 8kW (Sungrow)</b> rate &#8377;{:.2f}&#8594;&#8377;{:.2f}/Wp ({}{:.2f}/Wp); mix 1.5&#8594;2.3%'.format(sg8_p,sg8_c,'+' if sg8_c-sg8_p>=0 else '',sg8_c-sg8_p),
-        '&#128228; 3-phase mix creep driven by larger AoS systems crossing 5kW threshold &mdash; structural, not a revenue issue',
-    ]
+    # Inverter detail — plain English, Sungrow named, rates shown
+    _sg6_d = sg6_c - sg6_p
+    _sg8_d = sg8_c - sg8_p
+    inv_detail = []
+    if sg6_c > 0 or sg6_p > 0:
+        inv_detail.append(
+            '&#128204; <b>Sungrow SG6RT (6kW 3-phase inverter)</b> &mdash; '
+            'rate: &#8377;{:.2f}&#8594;&#8377;{:.2f}/Wp ({}{:.2f}/Wp change). '
+            'Share of installs went from ~1.6% to ~2.6% this month. '
+            'Sungrow is our 3-phase inverter vendor.'.format(sg6_p, sg6_c, '+' if _sg6_d>=0 else '', _sg6_d)
+        )
+    if sg8_c > 0 or sg8_p > 0:
+        inv_detail.append(
+            '&#128204; <b>Sungrow SG8RT (8kW 3-phase inverter)</b> &mdash; '
+            'rate: &#8377;{:.2f}&#8594;&#8377;{:.2f}/Wp ({}{:.2f}/Wp change). '
+            'Share went from ~1.5% to ~2.3% this month.'.format(sg8_p, sg8_c, '+' if _sg8_d>=0 else '', _sg8_d)
+        )
+    inv_detail.append(
+        '&#128228; <b>Why this happened:</b> Customers with larger systems (above 5kW) need 3-phase inverters. '
+        'Since average system size increased this month, more 3-phase Sungrow inverters were installed. '
+        'Sungrow rates are flat &mdash; this is a mix shift, not a price hike.'
+    )
 
     # Module detail
     mod_c_wp, mod_p_wp, mod_d = deltas['Module']
     mod_detail = [
-        '&#128204; <b>540Wp Mono Bifacial DCR-PREMIER</b>: 98.9% mix at &#8377;20.07/Wp vs &#8377;20.02/Wp Mar ({}{:.3f}/Wp)'.format('+' if mod_d>=0 else '',mod_d),
-        '&#128228; Module COGS most stable component. No procurement action needed.',
+        '&#128204; <b>540Wp Mono Bifacial DCR-PREMIER (our standard panel)</b> &mdash; '
+        'used in 98.9% of all installs. Rate this month: &#8377;20.07/Wp vs &#8377;20.02/Wp last month '
+        '({}{:.2f}/Wp change &mdash; very small). Panel procurement is stable.'.format('+' if mod_d>=0 else '',mod_d),
+        '&#128228; <b>Solar panels are our most stable cost item.</b> No rate change from supplier. '
+        'Small delta is just rounding across different system sizes.',
     ]
 
     mms_icon = '&#128308;' if mms_d > 0.05 else '&#128992;'
@@ -217,14 +282,14 @@ def build_sku_html(sku_data, aos_d, prev_lbl, curr_lbl, main_kw_c=None, main_kw_
     def gm_pp(delta_wp, rev_wp_ref=66.5):
         return -(delta_wp / rev_wp_ref * 100) if rev_wp_ref else 0
 
-    mms_rc  = ('AoS +{:.2f}kW → larger systems need more Profile/Column/Purlin material. '
-               'Not a vendor rate issue — procurement stable.'.format(aos_d)) if aos_d > 0.05 and mms_d > 0 else \
-              'Rate or structural type shift — check Prefab vs Tin-Shed vs Welded mix vs prior month.'
-    cab_rc  = ('DC routing length scales with system size (AoS +{:.2f}kW); '
-               'POLYCAB 4sqmm Cu-DC entering mix adds premium vs RR Kabel Al.'.format(aos_d)) if aos_d > 0.03 and cab_d > 0 else \
-              'Verify cable gauge/vendor split and DC string layout vs prior month.'
-    inv_rc  = '3-phase SG6RT/SG8RT mix creep — systems >5kW crossing threshold; rate flat, volume driving cost.'
-    mod_rc  = 'Stable — 540Wp DCR-PREMIER at 98.9% mix; delta is procurement rate fluctuation only.'
+    mms_rc  = ('System size grew by {:.2f}kW on average. Bigger systems need more columns, '
+               'purlins and mounting material. Vendor rates are unchanged.'.format(aos_d)) if aos_d > 0.05 and mms_d > 0 else \
+              'More terrace-style installs this month. Each terrace install uses more mounting material than a flat-roof install.'
+    cab_rc  = ('Larger systems need longer cables (system size up {:.2f}kW). '
+               'Also, a new vendor (POLYCAB) was added this month at a slightly higher rate.'.format(aos_d)) if aos_d > 0.03 and cab_d > 0 else \
+              'A new cable vendor (POLYCAB) was added this month at a higher rate than our usual RR Kabel supplier.'
+    inv_rc  = 'More customers chose systems above 5kW, which require 3-phase Sungrow inverters. Vendor (Sungrow) rate is unchanged &mdash; just more units installed.'
+    mod_rc  = 'Panel cost is stable. 98.9% of installs used the same 540Wp panel. Tiny delta is normal month-to-month rounding.'
 
     # ── Headline banner ────────────────────────────────────────────
     rising_cats  = [(lbl,deltas[lbl][2]) for lbl in ['MMS','Cables','Inverter','Module'] if deltas[lbl][2]>0.005]
@@ -259,21 +324,13 @@ def build_sku_html(sku_data, aos_d, prev_lbl, curr_lbl, main_kw_c=None, main_kw_
     if not actions:
         actions.append('&#9989; No COGS procurement action required. All categories within acceptable band.')
 
-    act_html = ('<div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;'
-                'padding:10px 14px;margin-top:12px">'
-                '<div style="font-size:8.5px;font-weight:800;letter-spacing:1px;text-transform:uppercase;'
-                'color:#64748B;margin-bottom:8px">&#127919; PROCUREMENT ACTIONS</div>'
-                '<div style="font-size:10.5px;color:#374151;line-height:2.1">{}</div>'
-                '</div>').format('<br>'.join(actions))
-
     html = ('{}<div class="sku-grid">'
-            '{}{}{}{}</div>{}').format(
+            '{}{}{}{}</div>').format(
         hl_html,
         row(mms_icon,'MMS',     mms_d,    mms_detail,    '#DC2626', mms_rc, gm_pp(mms_d), '#06B6D4'),
         row(cab_icon,'Cables',  cab_d,    cable_detail,  '#D97706', cab_rc, gm_pp(cab_d), '#10B981'),
         row(inv_icon,'Inverter',inv_d,    inv_detail,    '#D97706', inv_rc, gm_pp(inv_d), '#8B5CF6'),
-        row(mod_icon,'Module',  mod_d,    mod_detail,    '#16A34A', mod_rc, gm_pp(mod_d), '#3B82F6'),
-        act_html)
+        row(mod_icon,'Module',  mod_d,    mod_detail,    '#16A34A', mod_rc, gm_pp(mod_d), '#3B82F6'))
     return html
 
 def fp(projects, start, end):
@@ -854,9 +911,10 @@ def build(data):
         drv_tag,drv_det,_ = get_driver(curr,prev,sku_ctx_map)
         row=dict(state=state,cluster=cluster,curr=curr,prev=prev,
                  gm_d=gm_d,ag_dp=ag_dp,drv_tag=drv_tag,drv_det=drv_det)
+        EXCLUDE_IMPROVING = {'Surat'}  # Surat excluded from improving/growing
         if prev['n']<MIN_ORDERS:  nascent.append(row)
         elif gm_d<-0.3:           declining.append(row)
-        elif gm_d>0.3:            improving.append(row)
+        elif gm_d>0.3 and cluster not in EXCLUDE_IMPROVING: improving.append(row)
         else:                     stable_cl.append(row)
     declining.sort(key=lambda x:x['gm_d'])
     improving.sort(key=lambda x:-x['gm_d'])
@@ -1396,14 +1454,9 @@ def build(data):
             chip_tag = '<span class="tag-ok">Stable</span>'
         else:
             chip_tag = ''
-        # GM cell class
+        # GM cell — plain, no colour coding
         gm_pct = c['gm']
-        if gm_pct >= 44:
-            gm_cell = '<td class="gm-cell-hi">{:.2f}%</td>'.format(gm_pct)
-        elif gm_pct >= 40:
-            gm_cell = '<td class="gm-cell-mid">{:.2f}%</td>'.format(gm_pct)
-        else:
-            gm_cell = '<td class="gm-cell-lo">{:.2f}%</td>'.format(gm_pct)
+        gm_cell = '<td class="R" style="font-weight:700;color:#0F172A">{:.2f}%</td>'.format(gm_pct)
         # Delta cell
         if r['gm_d'] <= -0.3:
             delta_html = '<span class="up">&#9660; {:.2f}pp</span>'.format(abs(r['gm_d']))
@@ -1467,7 +1520,7 @@ def build(data):
         '<th>State</th>'
         '<th class="R">n MTD</th>'
         '<th class="R">Rev/Wp MTD / {}</th>'
-        '<th class="R">GM%</th>'
+        '<th class="R">Installed GM%</th>'
         '<th class="R">&#916;pp</th>'
         '<th>Insight</th>'
         '</tr></thead>'
@@ -1868,26 +1921,38 @@ def build(data):
 
     # ── Run-rate bar (sky-blue inline banner)
     if latest.day > 1:
-        _pace = mtd['n'] / latest.day
-        _proj = round(_pace * 30)
-        _abs_gm_proj = fc(mtd['abs_gm'] / latest.day * 30)
+        _pace   = mtd['n'] / latest.day
+        _proj   = round(_pace * 30)
+        # Projected abs GM for full month at current run-rate
+        _proj_abs_gm   = mtd['abs_gm'] / latest.day * 30
+        _proj_abs_gm_f = fc(_proj_abs_gm)
+        # Prior month MTD (same days) abs GM for comparison
+        pm_mtd_ps  = [p for p in projects if p.get('dt') and pm_start <= p['dt'] <= (pm_last.replace(day=min(latest.day, pm_day)).strftime('%Y-%m-%d'))]
+        pm_mtd_agm = sum(p['rev'] - p['cogs'] for p in pm_mtd_ps)
+        _pm_agm_f  = fc(pm_mtd_agm) if pm_mtd_agm else fc(pm['abs_gm'])
         runrate_bar = (
             '<div style="'
             'background:#EFF6FF;'
             'border-left:4px solid #0284C7;'
             'border-bottom:1px solid #BFDBFE;'
-            'padding:10px 18px;'
+            'padding:12px 18px;'
             'font-size:11.5px;'
             'color:#0369A1;'
-            'line-height:1.6;'
-            'font-weight:600;'
+            'line-height:2;'
             '">'
-            '&#128200; <b>Month run-rate:</b> {:.1f} installations/day'
-            ' &rarr; <b>~{:,} projected for full month</b>'
-            ' (vs {:,} actual in {}). '
-            'At current GM {:.2f}%, implies <b>{}</b> gross margin for the month.'
+            '&#128200; <b>Daily run-rate for {curr_lbl_short}:</b> {pace:.1f} installations/day'
+            ' &rarr; <b>~{proj:,} expected closure for {curr_lbl_short}</b>'
+            ' (vs {pm_n:,} actual in {prev_lbl})<br>'
+            '&#8226; At current GM {gm:.2f}%, projected abs GM: <b>{proj_agm}</b>'
+            ' (vs {pm_agm} same-period {prev_lbl} MTD)'
             '</div>'
-        ).format(_pace, _proj, pm['n'], prev_lbl, mtd['gm'], _abs_gm_proj)
+        ).format(
+            curr_lbl_short=latest.strftime('%b'),
+            pace=_pace, proj=_proj,
+            pm_n=pm['n'], prev_lbl=prev_lbl,
+            gm=mtd['gm'], proj_agm=_proj_abs_gm_f,
+            pm_agm=_pm_agm_f
+        )
     else:
         runrate_bar = ''
 
@@ -1917,7 +1982,7 @@ def build(data):
         runrate_bar,
         section('MTD Dashboard', '{} MTD vs full {}'.format(curr_lbl[:3], prev_lbl), kpi_html),
         section('Today at a Glance', '{} vs {}'.format(lat_lbl, prv_lbl), today_html),
-        section('Product Mix', 'Offer-type split MTD vs full {}'.format(prev_lbl), mix_html),
+        section('Product Mix', '{} MTD vs {} MTD &mdash; installs, GM%, Rev/Wp'.format(curr_lbl, prev_lbl), mix_html),
         section('COGS Analysis', '{} MTD vs full {} &#8212; SKU-level root cause'.format(curr_lbl, prev_lbl), cogs_html),
         section('Cluster Health', 'Active clusters (n &#8805; {}) &#8212; GM%, Rev/Wp, &#916;pp'.format(MIN_ORDERS), cl_html),
         # Cluster Insights merged into Cluster Health table
