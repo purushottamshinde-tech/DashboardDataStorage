@@ -696,7 +696,7 @@ body{
   overflow-x:auto;-webkit-overflow-scrolling:touch;
   border-radius:8px;border:1px solid #DBEAFE;
 }
-.cluster-wrap .data-table{min-width:600px;font-size:12px}
+.cluster-wrap .data-table{min-width:480px;font-size:12px}
 .cluster-wrap .data-table th{
   font-size:8px;padding:8px 9px;white-space:nowrap;
   color:#E0F2FE;border-bottom:2px solid #0369A1;
@@ -1499,7 +1499,6 @@ def build(data):
         return (
             '<tr style="{}">'
             '<td style="font-weight:700">{}</td>'
-            '<td>{}</td>'
             '<td class="R">{}</td>'
             '<td class="R mono">{:.2f} / {:.2f}</td>'
             '{}'
@@ -1507,7 +1506,7 @@ def build(data):
             '{}'
             '</tr>'
         ).format(
-            bgs, r['cluster'], sd, c['n'],
+            bgs, r['cluster'], c['n'],
             c['rev_wp'], p['rev_wp'] if p['n'] else 0,
             gm_cell,
             delta_html,
@@ -1517,7 +1516,6 @@ def build(data):
     cl_thead = (
         '<thead><tr>'
         '<th>Cluster</th>'
-        '<th>State</th>'
         '<th class="R">n MTD</th>'
         '<th class="R">Rev/Wp MTD / {}</th>'
         '<th class="R">Installed GM%</th>'
@@ -1528,16 +1526,16 @@ def build(data):
 
     cl_tbody = ''
     if declining:
-        cl_tbody += '<tr class="group-row"><td colspan="7">&#9660; Declining vs {} &#8212; needs attention</td></tr>'.format(prev_lbl)
+        cl_tbody += '<tr class="group-row"><td colspan="6">&#9660; Declining vs {} &#8212; needs attention</td></tr>'.format(prev_lbl)
         cl_tbody += ''.join(cl_row(r,'#FFFBFB') for r in declining)
     if improving:
-        cl_tbody += '<tr class="group-row"><td colspan="7">&#9650; Improving vs {}</td></tr>'.format(prev_lbl)
+        cl_tbody += '<tr class="group-row"><td colspan="6">&#9650; Improving vs {}</td></tr>'.format(prev_lbl)
         cl_tbody += ''.join(cl_row(r,'#F9FFFA') for r in improving)
     if stable_cl:
-        cl_tbody += '<tr class="group-row"><td colspan="7">&#8594; Stable (within &plusmn;0.3pp)</td></tr>'
+        cl_tbody += '<tr class="group-row"><td colspan="6">&#8594; Stable (within &plusmn;0.3pp)</td></tr>'
         cl_tbody += ''.join(cl_row(r) for r in stable_cl)
     if nascent:
-        cl_tbody += '<tr class="group-row"><td colspan="7">&#9733; New / growing clusters</td></tr>'
+        cl_tbody += '<tr class="group-row"><td colspan="6">&#9733; New / growing clusters</td></tr>'
         cl_tbody += ''.join(cl_row(r,'#FAF5FF') for r in nascent)
 
     cl_html = (
