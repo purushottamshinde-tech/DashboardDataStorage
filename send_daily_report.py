@@ -571,50 +571,65 @@ body{
 
 .kgrid{
   width:100%;border-collapse:separate;border-spacing:8px;
-  margin:-8px;
+  margin:-8px;table-layout:fixed;
 }
 .kc{
   width:50%;
   background:#F8FAFC;
   border:1px solid #DBEAFE;
+  border-top:4px solid #BAE6FD;
   border-radius:10px;
-  padding:13px 14px 11px;
+  padding:14px 13px 14px;
   vertical-align:top;
+  height:110px;
 }
 .kc-label{
-  display:block;font-size:7.5px;font-weight:700;letter-spacing:1.4px;
-  text-transform:uppercase;color:#94A3B8;margin-bottom:7px;
+  display:block;font-size:7px;font-weight:800;letter-spacing:1.6px;
+  text-transform:uppercase;color:#94A3B8;margin-bottom:6px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }
 .kc-val{
-  display:block;font-size:20px;font-weight:800;
-  letter-spacing:-.4px;line-height:1;margin-bottom:5px;
+  display:block;font-size:21px;font-weight:900;
+  letter-spacing:-.5px;line-height:1;margin-bottom:5px;
+  white-space:nowrap;overflow:hidden;
 }
 .kc-sub{
-  display:block;font-size:10px;color:#94A3B8;line-height:1.4;
+  display:block;font-size:9.5px;color:#94A3B8;line-height:1.35;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }
-.kc-trend{display:block;margin-top:5px;font-size:11px;font-weight:700}
+.kc-trend{
+  display:block;margin-top:6px;font-size:11px;font-weight:700;
+  white-space:nowrap;
+}
 
 .today-grid{
   width:100%;border-collapse:separate;border-spacing:8px;
-  margin:-8px;
+  margin:-8px;table-layout:fixed;
 }
 .tc{
   width:50%;
   background:#F0FDFA;
   border:1px solid #CCFBF1;
+  border-top:4px solid #99F6E4;
   border-radius:10px;
-  padding:13px 14px 11px;
+  padding:14px 13px 14px;
   vertical-align:top;
+  height:100px;
 }
 .tc-label{
-  display:block;font-size:7.5px;font-weight:700;letter-spacing:1.4px;
-  text-transform:uppercase;color:#94A3B8;margin-bottom:7px;
+  display:block;font-size:7px;font-weight:800;letter-spacing:1.6px;
+  text-transform:uppercase;color:#94A3B8;margin-bottom:6px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }
 .tc-today{
-  display:block;font-size:20px;font-weight:800;
-  letter-spacing:-.4px;line-height:1;margin-bottom:5px;
+  display:block;font-size:21px;font-weight:900;
+  letter-spacing:-.5px;line-height:1;margin-bottom:5px;
+  white-space:nowrap;overflow:hidden;
 }
-.tc-prev{display:block;font-size:10px;color:#64748B;line-height:1.4}
+.tc-prev{
+  display:block;font-size:9.5px;color:#64748B;line-height:1.35;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
 
 .table-scroll{
   width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;
@@ -809,15 +824,18 @@ body{
 
   .section{padding:14px 12px}
 
-  .kgrid{border-spacing:6px;margin:-6px}
-  .kc{padding:11px 11px 9px}
-  .kc-val{font-size:17px}
-  .kc-sub{font-size:9.5px}
+  .kgrid{border-spacing:5px;margin:-5px}
+  .kc{padding:11px 10px 11px;height:100px}
+  .kc-label{font-size:6.5px;letter-spacing:1.2px;margin-bottom:5px}
+  .kc-val{font-size:18px;margin-bottom:4px}
+  .kc-sub{font-size:9px}
+  .kc-trend{font-size:10.5px;margin-top:4px}
 
-  .today-grid{border-spacing:6px;margin:-6px}
-  .tc{padding:11px 11px 9px}
-  .tc-today{font-size:17px}
-  .tc-prev{font-size:9.5px}
+  .today-grid{border-spacing:5px;margin:-5px}
+  .tc{padding:11px 10px 11px;height:95px}
+  .tc-label{font-size:6.5px;letter-spacing:1.2px;margin-bottom:5px}
+  .tc-today{font-size:18px;margin-bottom:4px}
+  .tc-prev{font-size:9px}
 
   .sku-grid{gap:8px}
   .sku-cat{font-size:11px}
@@ -1077,7 +1095,7 @@ def build(data):
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     def kcard(label, val, sub, vc='#111827', trend_html='', accent='#0284C7'):
         return (
-            '<td class="kc" style="border-top:4px solid {0}">'
+            '<td class="kc" style="border-top-color:{0}">'
             '<span class="kc-label">{1}</span>'
             '<span class="kc-val" style="color:{2}">{3}</span>'
             '<span class="kc-sub">{4}</span>'
@@ -1086,7 +1104,7 @@ def build(data):
         ).format(accent, label, vc, val, sub, trend_html)
 
     kpi_html = (
-        '<table class="kgrid"><tr>'
+        '<div style="padding:4px 0"><table class="kgrid"><tr>'
         + kcard('Installations MTD', '{:,}'.format(mtd['n']),
                 'vs {:,} {} (1&#8211;{})'.format(pm['n'], prev_lbl, pm_day),
                 trend_html=dpct(mtd['n'], pm['n']), accent='#0284C7')
@@ -1120,7 +1138,7 @@ def build(data):
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     def tcard(label, today_val, prev_val, delta_html, vc='#111827', accent='#0D9488'):
         return (
-            '<td class="tc" style="border-top:4px solid {0}">'
+            '<td class="tc" style="border-top-color:{0}">'
             '<span class="tc-label">{1}</span>'
             '<span class="tc-today" style="color:{2}">{3}</span>'
             '<span class="tc-prev">vs {4} yesterday &nbsp; {5}</span>'
